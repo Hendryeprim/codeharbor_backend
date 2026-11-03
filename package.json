@@ -11,6 +11,7 @@
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:push": "prisma db push",
     "prisma:seed": "node prisma/seed.js",
+    "admin:create": "node src/scripts/reset-admin.js",
     "test": "node --test"
   },
   "dependencies": {
