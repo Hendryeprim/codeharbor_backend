@@ -33,14 +33,12 @@ app.use(
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow localhost dev origins or no origin for tools/Postman
-      if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
-        callback(null, true);
-      } else {
-        callback(null, true);
-      }
+      // Allow coderharbor.com, localhost dev, or any legitimate client
+      callback(null, true);
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   })
 );
 
