@@ -106,6 +106,8 @@ export const getProducts = async (req, res, next) => {
     const formattedProducts = products.map((p) => ({
       ...p,
       price: Number(p.price),
+      viewPrice: Number(p.viewPrice || 0),
+      isViewFree: p.isViewFree ?? true,
       technologies: p.technologies.map((t) => t.technology),
     }));
 
@@ -158,6 +160,8 @@ export const getFeaturedProducts = async (req, res, next) => {
     const formattedProducts = products.map((p) => ({
       ...p,
       price: Number(p.price),
+      viewPrice: Number(p.viewPrice || 0),
+      isViewFree: p.isViewFree ?? true,
       technologies: p.technologies.map((t) => t.technology),
     }));
 
@@ -230,6 +234,8 @@ export const getProductBySlug = async (req, res, next) => {
     const formattedProduct = {
       ...product,
       price: Number(product.price),
+      viewPrice: Number(product.viewPrice || 0),
+      isViewFree: product.isViewFree ?? true,
       technologies: product.technologies.map((t) => t.technology),
       files: product.files.map((f) => ({
         ...f,

@@ -1,3 +1,5 @@
+import { config } from '../config/index.js';
+
 export const notFoundHandler = (req, res, next) => {
   res.status(404).json({
     success: false,
@@ -17,11 +19,27 @@ export const errorHandler = (err, req, res, next) => {
     });
   }
 
+  // Prisma foreign key constraint violation
+  if (err.code === 'P2003') {
+    return res.status(400).json({
+      success: false,
+      message: 'One or more referenced categories or technologies are invalid.',
+    });
+  }
+
+  // Prisma validation errors
+  if (err.name === 'PrismaClientValidationError') {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid project data provided. Please check the required fields and technology selections.',
+    });
+  }
+
   // Multer file size error
   if (err.code === 'LIMIT_FILE_SIZE') {
     return res.status(400).json({
       success: false,
-      message: 'Uploaded file exceeds the maximum permitted size limit.',
+      message: `Uploaded file exceeds the maximum permitted size limit (${Math.round((config.maxUploadSize || 1073741824) / (1024 * 1024))}MB).`,
     });
   }
 

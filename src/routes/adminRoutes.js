@@ -18,6 +18,9 @@ import {
   getAdminOrders,
   uploadImageFile,
   uploadProjectZip,
+  rebuildProductPreview,
+  toggleProductPreview,
+  getProductPreviewLogs,
   getWebsiteSettings,
   updateWebsiteSetting,
 } from '../controllers/adminController.js';
@@ -38,6 +41,11 @@ router.post('/products', createProduct);
 router.get('/products/:id', getAdminProductById);
 router.patch('/products/:id', updateProduct);
 router.delete('/products/:id', deleteProduct);
+
+// Product Live Preview Controls
+router.post('/products/:id/preview/rebuild', rebuildProductPreview);
+router.patch('/products/:id/preview/toggle', toggleProductPreview);
+router.get('/products/:id/preview/logs', getProductPreviewLogs);
 
 // Categories
 router.get('/categories', getAdminCategories);

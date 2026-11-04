@@ -150,6 +150,8 @@ export const getMyProjects = async (req, res, next) => {
       ...downloads.map((d) => ({
         ...d.product,
         price: Number(d.product.price),
+        viewPrice: Number(d.product.viewPrice || 0),
+        isViewFree: d.product.isViewFree ?? true,
         technologies: d.product.technologies.map((t) => t.technology),
         files: d.product.files.map((f) => ({ ...f, fileSize: Number(f.fileSize) })),
         downloadedAt: d.downloadedAt,
@@ -160,6 +162,8 @@ export const getMyProjects = async (req, res, next) => {
         .map((p) => ({
           ...p,
           price: Number(p.price),
+          viewPrice: Number(p.viewPrice || 0),
+          isViewFree: p.isViewFree ?? true,
           technologies: p.technologies.map((t) => t.technology),
           files: p.files.map((f) => ({ ...f, fileSize: Number(f.fileSize) })),
           accessType: 'AVAILABLE_FREE',

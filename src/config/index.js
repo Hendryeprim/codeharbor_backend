@@ -15,6 +15,6 @@ export const config = {
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
   nodeEnv: process.env.NODE_ENV || 'development',
   fileStoragePath: process.env.FILE_STORAGE_PATH || './storage',
-  maxUploadSize: parseInt(process.env.MAX_UPLOAD_SIZE, 10) || 50 * 1024 * 1024, // 50MB
+  maxUploadSize: parseInt(process.env.MAX_UPLOAD_SIZE, 10) || 1024 * 1024 * 1024, // 1GB limit for project archives
 };
 

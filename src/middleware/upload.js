@@ -70,7 +70,7 @@ export const uploadImage = multer({
 
 export const uploadProjectArchive = multer({
   storage: privateFileStorage,
-  limits: { fileSize: config.maxUploadSize }, // e.g. 50MB
+  limits: { fileSize: config.maxUploadSize || 1024 * 1024 * 1024 }, // 1GB archive limit
   fileFilter: zipFilter,
 });
 

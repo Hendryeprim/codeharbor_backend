@@ -55,6 +55,23 @@ enum TicketPriority {
   HIGH
 }
 
+enum PreviewStatus {
+  NONE
+  PENDING
+  BUILDING
+  READY
+  FAILED
+  DISABLED
+  REQUIRES_INFRASTRUCTURE
+}
+
+enum PreviewType {
+  STATIC_HTML
+  REACT_VITE
+  FULLSTACK
+  UNKNOWN
+}
+
 model User {
   id           String         @id @default(uuid())
   name         String
@@ -112,9 +129,16 @@ model Product {
   categoryId               String
   thumbnail                String?
   demoUrl                  String?
+  previewUrl               String?
+  previewStatus            PreviewStatus  @default(NONE)
+  previewType              PreviewType?
+  previewBuildLogs         String?        @db.Text
+  previewUpdatedAt         DateTime?
   productType              ProductType    @default(FULL_APPLICATION)
   price                    Decimal        @default(0.00) @db.Decimal(10, 2)
   isFree                   Boolean        @default(false)
+  viewPrice                Decimal        @default(0.00) @db.Decimal(10, 2)
+  isViewFree               Boolean        @default(true)
   isFeatured               Boolean        @default(false)
   status                   ProductStatus  @default(PUBLISHED)
   licenseText              String?

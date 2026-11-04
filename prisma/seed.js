@@ -116,8 +116,9 @@ async function main() {
     { key: 'site_title', value: 'CoderHarbor – Digital Project Marketplace', description: 'Platform primary title' },
     { key: 'site_tagline', value: 'Your Projects. Your Possibilities.', description: 'Brand slogan' },
     { key: 'contact_email', value: 'support@coderharbor.com', description: 'Official support inbox' },
-    { key: 'contact_phone', value: '+1 (800) 555-0199', description: 'Official contact phone' },
-    { key: 'contact_address', value: '742 Harbor Way, Suite 400, San Francisco, CA 94107', description: 'Headquarters physical address' },
+    { key: 'contact_phone', value: '+91 96000 45602', description: 'Official contact phone' },
+    { key: 'contact_address', value: 'TRIDIN SOFTWARE PRIVATE LIMITED, 6th Floor, Block B, TECCI PARK, M229, #173, Cactus Corporate Coworking, Rajiv Gandhi Salai, OMR, Chennai, Tamil Nadu 600119', description: 'Headquarters physical address' },
+    { key: 'company_name', value: 'TRIDIN SOFTWARE PRIVATE LIMITED', description: 'Registered Corporate Entity' },
     { key: 'purchasing_notice', value: 'Online purchasing is coming soon. Please check back later.', description: 'Notice shown for paid projects' },
   ];
 

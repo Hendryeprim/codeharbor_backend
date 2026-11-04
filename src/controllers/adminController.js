@@ -3,6 +3,11 @@ import fs from 'fs';
 import prisma from '../database/prisma.js';
 import { createSlug } from '../utils/slug.js';
 import { clearCachePattern } from '../utils/cache.js';
+import {
+  processProjectZip,
+  rebuildProjectPreview,
+  toggleProjectPreview,
+} from '../services/previewService.js';
 
 export const getDashboardStats = async (req, res, next) => {
   try {
@@ -100,6 +105,8 @@ export const getAdminProducts = async (req, res, next) => {
     const formatted = products.map((p) => ({
       ...p,
       price: Number(p.price),
+      viewPrice: Number(p.viewPrice || 0),
+      isViewFree: p.isViewFree ?? true,
       technologies: p.technologies.map((t) => t.technology),
       files: p.files.map((f) => ({ ...f, fileSize: Number(f.fileSize) })),
     }));
@@ -140,6 +147,8 @@ export const getAdminProductById = async (req, res, next) => {
       product: {
         ...product,
         price: Number(product.price),
+        viewPrice: Number(product.viewPrice || 0),
+        isViewFree: product.isViewFree ?? true,
         technologies: product.technologies.map((t) => t.technology),
         files: product.files.map((f) => ({ ...f, fileSize: Number(f.fileSize) })),
       },
@@ -161,6 +170,8 @@ export const createProduct = async (req, res, next) => {
       productType = 'FULL_APPLICATION',
       price = 0,
       isFree = false,
+      viewPrice = 0,
+      isViewFree = true,
       isFeatured = false,
       status = 'PUBLISHED',
       licenseText,
@@ -198,6 +209,8 @@ export const createProduct = async (req, res, next) => {
         productType,
         price: parseFloat(price) || 0,
         isFree: Boolean(isFree),
+        viewPrice: parseFloat(viewPrice) || 0,
+        isViewFree: Boolean(isViewFree),
         isFeatured: Boolean(isFeatured),
         status,
         licenseText: licenseText || null,
@@ -207,9 +220,12 @@ export const createProduct = async (req, res, next) => {
         documentationAvailable: Boolean(documentationAvailable),
         downloadAllowed: Boolean(downloadAllowed),
         technologies: {
-          create: technologyIds.map((techId) => ({
-            technologyId: techId,
-          })),
+          create: (technologyIds || [])
+            .map((t) => (typeof t === 'object' && t !== null ? t.id || t.technologyId : t))
+            .filter((techId) => typeof techId === 'string' && techId.trim().length > 0)
+            .map((techId) => ({
+              technologyId: techId,
+            })),
         },
         images: {
           create: images.map((img, index) => ({
@@ -232,6 +248,8 @@ export const createProduct = async (req, res, next) => {
       product: {
         ...product,
         price: Number(product.price),
+        viewPrice: Number(product.viewPrice || 0),
+        isViewFree: product.isViewFree ?? true,
         technologies: product.technologies.map((t) => t.technology),
       },
     });
@@ -253,6 +271,8 @@ export const updateProduct = async (req, res, next) => {
       productType,
       price,
       isFree,
+      viewPrice,
+      isViewFree,
       isFeatured,
       status,
       licenseText,
@@ -278,6 +298,8 @@ export const updateProduct = async (req, res, next) => {
     if (productType !== undefined) data.productType = productType;
     if (price !== undefined) data.price = parseFloat(price) || 0;
     if (isFree !== undefined) data.isFree = Boolean(isFree);
+    if (viewPrice !== undefined) data.viewPrice = parseFloat(viewPrice) || 0;
+    if (isViewFree !== undefined) data.isViewFree = Boolean(isViewFree);
     if (isFeatured !== undefined) data.isFeatured = Boolean(isFeatured);
     if (status !== undefined) data.status = status;
     if (licenseText !== undefined) data.licenseText = licenseText;
@@ -289,10 +311,16 @@ export const updateProduct = async (req, res, next) => {
 
     // Update technologies if provided
     if (Array.isArray(technologyIds)) {
+      const validTechIds = technologyIds
+        .map((t) => (typeof t === 'object' && t !== null ? t.id || t.technologyId : t))
+        .filter((tId) => typeof tId === 'string' && tId.trim().length > 0);
+
       await prisma.productTechnology.deleteMany({ where: { productId: id } });
-      data.technologies = {
-        create: technologyIds.map((tId) => ({ technologyId: tId })),
-      };
+      if (validTechIds.length > 0) {
+        data.technologies = {
+          create: validTechIds.map((tId) => ({ technologyId: tId })),
+        };
+      }
     }
 
     // Update images if provided
@@ -325,6 +353,8 @@ export const updateProduct = async (req, res, next) => {
       product: {
         ...updated,
         price: Number(updated.price),
+        viewPrice: Number(updated.viewPrice || 0),
+        isViewFree: updated.isViewFree ?? true,
         technologies: updated.technologies.map((t) => t.technology),
         files: updated.files.map((f) => ({ ...f, fileSize: Number(f.fileSize) })),
       },
@@ -584,14 +614,72 @@ export const uploadProjectZip = async (req, res, next) => {
       },
     });
 
+    // Automatically trigger safe project detection, build, and preview generation
+    let previewResult = null;
+    try {
+      previewResult = await processProjectZip(productId, req.file.path, req.file.originalname);
+    } catch (err) {
+      console.error('Auto preview processing error:', err.message);
+    }
+
+    clearCachePattern('product');
+
     res.status(201).json({
       success: true,
-      message: 'Project archive uploaded to secure private storage.',
+      message: 'Project archive uploaded and processed for live preview.',
       file: {
         ...file,
         fileSize: Number(file.fileSize),
       },
+      preview: previewResult,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const rebuildProductPreview = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const result = await rebuildProjectPreview(id);
+    clearCachePattern('product');
+    res.status(200).json({ success: true, message: 'Preview rebuild triggered.', result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const toggleProductPreview = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { enable } = req.body;
+    const updated = await toggleProjectPreview(id, Boolean(enable));
+    clearCachePattern('product');
+    res.status(200).json({ success: true, message: `Preview ${enable ? 'enabled' : 'disabled'}.`, product: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getProductPreviewLogs = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const product = await prisma.product.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        title: true,
+        previewUrl: true,
+        previewStatus: true,
+        previewType: true,
+        previewBuildLogs: true,
+        previewUpdatedAt: true,
+      },
+    });
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product not found.' });
+    }
+    res.status(200).json({ success: true, preview: product });
   } catch (error) {
     next(error);
   }
