@@ -25,7 +25,7 @@ async function main() {
   }
 
   // 1. Seed Users
-  const adminPassword = await bcrypt.hash('Admin@12345', 10);
+  const adminPassword = await bcrypt.hash('CoderHarbor@2026#Admin', 10);
   const customerPassword = await bcrypt.hash('Customer@12345', 10);
 
   const admin = await prisma.user.upsert({

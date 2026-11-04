@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import prisma from '../database/prisma.js';
 
 const email = process.argv[2] || 'admin@coderharbor.com';
-const password = process.argv[3] || 'Admin@12345';
+const password = process.argv[3] || 'CoderHarbor@2026#Admin';
 
 async function main() {
   console.log(`Setting up Admin account: ${email}...`);
