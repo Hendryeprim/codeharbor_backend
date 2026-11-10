@@ -582,10 +582,14 @@ export const uploadImageFile = (req, res) => {
   }
 
   const relativeUrl = `/uploads/images/${req.file.filename}`;
+  const baseUrl = process.env.BACKEND_PUBLIC_URL || 'https://api.coderharbor.com';
+  const fullUrl = `${baseUrl.replace(/\/$/, '')}${relativeUrl}`;
+
   res.status(200).json({
     success: true,
     message: 'Image uploaded successfully.',
     url: relativeUrl,
+    fullUrl: fullUrl,
     filename: req.file.filename,
   });
 };

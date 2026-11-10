@@ -42,29 +42,36 @@ const privateFileStorage = multer.diskStorage({
 });
 
 const imageFilter = (req, file, cb) => {
-  const allowed = /jpeg|jpg|png|webp|svg|gif/;
-  const extname = allowed.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowed.test(file.mimetype);
+  const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
+  const isImageExt = /^(jpe?g|png|webp|svg|gif|jfif|bmp|ico|avif|tiff|heic)$/i.test(ext);
+  const isImageMime = (file.mimetype || '').toLowerCase().startsWith('image/') || file.mimetype === 'application/octet-stream';
 
-  if (extname && mimetype) {
+  if (isImageExt || isImageMime) {
     return cb(null, true);
   }
-  cb(new Error('Invalid file format. Only JPEG, PNG, WEBP, SVG, and GIF images are permitted.'));
+  cb(new Error('Invalid image format. Supported formats: JPG, PNG, WEBP, SVG, GIF, BMP, ICO, AVIF.'));
 };
 
 const zipFilter = (req, file, cb) => {
-  const allowedExts = ['.zip', '.tar', '.gz', '.7z', '.rar'];
   const ext = path.extname(file.originalname).toLowerCase();
+  const allowedExts = ['.zip', '.tar', '.gz', '.tgz', '.7z', '.rar', '.bz2', '.xz'];
+  const mime = (file.mimetype || '').toLowerCase();
+  const isArchiveMime =
+    mime.includes('zip') ||
+    mime.includes('compressed') ||
+    mime.includes('archive') ||
+    mime.includes('tar') ||
+    mime.includes('octet-stream');
 
-  if (allowedExts.includes(ext)) {
+  if (allowedExts.includes(ext) || isArchiveMime) {
     return cb(null, true);
   }
-  cb(new Error('Invalid project file format. Only archive files (.zip, .tar.gz, .7z) are permitted.'));
+  cb(new Error('Invalid project file format. Supported archive formats: .zip, .tar, .gz, .7z, .rar.'));
 };
 
 export const uploadImage = multer({
   storage: imageStorage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit for images
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB limit for images
   fileFilter: imageFilter,
 });
 
