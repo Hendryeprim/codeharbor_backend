@@ -1,8 +1,17 @@
 import path from 'path';
 import fs from 'fs';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import bcrypt from 'bcryptjs';
 import prisma from '../database/prisma.js';
 import { PRIVATE_STORAGE_DIR } from '../middleware/upload.js';
+import {
+  TEMP_BUILDS_DIR,
+  downloadGithubZipToFile,
+  fetchGithubArchiveResponse,
+  mergeGithubZips,
+  parseGithubStorageKey,
+} from '../services/previewService.js';
 
 export const getProfile = async (req, res, next) => {
   try {
@@ -264,6 +273,82 @@ export const downloadFreeProduct = async (req, res, next) => {
         success: false,
         message: 'This source-code file is restricted. Purchasing for paid products is currently Coming Soon.',
       });
+    }
+
+    // Support zero-storage GitHub source downloads directly streamed through backend
+    const githubMeta = parseGithubStorageKey(file.privateStorageKey);
+    if (githubMeta) {
+      if (githubMeta.mode === 'dual') {
+        const suffix = `dl_${file.productId}_${Date.now()}`;
+        const tempFe = path.join(TEMP_BUILDS_DIR, `fe_${suffix}.zip`);
+        const tempBe = path.join(TEMP_BUILDS_DIR, `be_${suffix}.zip`);
+        const tempFull = path.join(TEMP_BUILDS_DIR, `full_${suffix}.zip`);
+
+        try {
+          await Promise.all([
+            downloadGithubZipToFile(
+              `https://github.com/${githubMeta.frontend.owner}/${githubMeta.frontend.repo}/tree/${githubMeta.frontend.branch}`,
+              tempFe
+            ),
+            downloadGithubZipToFile(
+              `https://github.com/${githubMeta.backend.owner}/${githubMeta.backend.repo}/tree/${githubMeta.backend.branch}`,
+              tempBe
+            ),
+          ]);
+
+          mergeGithubZips(tempFe, tempBe, tempFull);
+
+          await prisma.download.create({
+            data: {
+              userId: req.user.id,
+              productId: file.productId,
+              productFileId: file.id,
+              ipAddress: req.ip || req.headers['x-forwarded-for'] || null,
+              userAgent: req.headers['user-agent'] || null,
+            },
+          });
+
+          res.setHeader(
+            'Content-Disposition',
+            `attachment; filename="${encodeURIComponent(file.originalName || `${githubMeta.frontend.repo}-fullstack.zip`)}"`
+          );
+          res.setHeader('Content-Type', 'application/zip');
+
+          await pipeline(fs.createReadStream(tempFull), res);
+        } finally {
+          for (const p of [tempFe, tempBe, tempFull]) {
+            try {
+              if (fs.existsSync(p)) fs.rmSync(p, { force: true });
+            } catch (_) {}
+          }
+        }
+        return;
+      }
+
+      const { response } = await fetchGithubArchiveResponse(
+        githubMeta.owner,
+        githubMeta.repo,
+        githubMeta.branch
+      );
+
+      await prisma.download.create({
+        data: {
+          userId: req.user.id,
+          productId: file.productId,
+          productFileId: file.id,
+          ipAddress: req.ip || req.headers['x-forwarded-for'] || null,
+          userAgent: req.headers['user-agent'] || null,
+        },
+      });
+
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${encodeURIComponent(file.originalName || `${githubMeta.repo}.zip`)}"`
+      );
+      res.setHeader('Content-Type', 'application/zip');
+
+      await pipeline(Readable.fromWeb(response.body), res);
+      return;
     }
 
     // Path traversal prevention: resolve path inside PRIVATE_STORAGE_DIR

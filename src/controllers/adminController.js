@@ -5,9 +5,11 @@ import { createSlug } from '../utils/slug.js';
 import { clearCachePattern } from '../utils/cache.js';
 import {
   processProjectZip,
+  processGithubRepo,
   rebuildProjectPreview,
   toggleProjectPreview,
 } from '../services/previewService.js';
+import { PRIVATE_STORAGE_DIR } from '../middleware/upload.js';
 
 export const getDashboardStats = async (req, res, next) => {
   try {
@@ -661,6 +663,74 @@ export const uploadProjectZip = async (req, res, next) => {
       preview: previewResult,
     });
   } catch (error) {
+    next(error);
+  }
+};
+
+export const importProjectGithubLink = async (req, res, next) => {
+  try {
+    const { productId, githubUrl, backendGithubUrl = '', githubToken = '' } = req.body;
+
+    if (!productId || !githubUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'Product ID and Frontend / Main GitHub repository URL are required.',
+      });
+    }
+
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+      include: { files: true },
+    });
+
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product not found.' });
+    }
+
+    const result = await processGithubRepo(productId, githubUrl, {
+      backendGithubUrl,
+      token: githubToken,
+    });
+
+    // Remove previous local ZIP files from disk + DB to save server storage
+    for (const oldFile of product.files || []) {
+      if (oldFile.privateStorageKey && !oldFile.privateStorageKey.startsWith('github')) {
+        try {
+          const oldPath = path.join(PRIVATE_STORAGE_DIR, path.basename(oldFile.privateStorageKey));
+          if (fs.existsSync(oldPath)) fs.rmSync(oldPath, { force: true });
+        } catch (_) {}
+      }
+    }
+    await prisma.productFile.deleteMany({ where: { productId } });
+
+    const ghFile = await prisma.productFile.create({
+      data: {
+        productId,
+        filename: result.github.displayFilename || `${result.github.owner}/${result.github.repo}@${result.github.branch}`,
+        originalName: result.github.originalName || `${result.github.repo}-${result.github.branch}.zip`,
+        privateStorageKey: result.github.storageKey,
+        fileSize: BigInt(result.github.archiveBytes),
+        fileType: 'application/vnd.github+zip',
+        version: result.github.branch.slice(0, 20),
+      },
+    });
+
+    clearCachePattern('product');
+
+    res.status(201).json({
+      success: true,
+      message: 'GitHub repository linked! Template preview ready with zero ZIP storage.',
+      file: {
+        ...ghFile,
+        fileSize: Number(ghFile.fileSize),
+      },
+      preview: result.preview,
+      github: result.github,
+    });
+  } catch (error) {
+    if (error.message?.includes('GitHub') || error.message?.includes('URL')) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
     next(error);
   }
 };

@@ -202,6 +202,7 @@ export const getProductBySlug = async (req, res, next) => {
           orderBy: { displayOrder: 'asc' },
         },
         files: {
+          orderBy: { createdAt: 'desc' },
           select: {
             id: true,
             originalName: true,

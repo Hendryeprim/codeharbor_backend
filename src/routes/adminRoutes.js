@@ -18,6 +18,7 @@ import {
   getAdminOrders,
   uploadImageFile,
   uploadProjectZip,
+  importProjectGithubLink,
   rebuildProductPreview,
   toggleProductPreview,
   getProductPreviewLogs,
@@ -68,6 +69,7 @@ router.get('/orders', getAdminOrders);
 // Uploads
 router.post('/upload/image', uploadImage.single('image'), uploadImageFile);
 router.post('/upload/project-file', uploadProjectArchive.single('file'), uploadProjectZip);
+router.post('/upload/github-link', importProjectGithubLink);
 
 // Settings
 router.get('/settings', getWebsiteSettings);

@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import AdmZip from 'adm-zip';
 import prisma from '../database/prisma.js';
 import { config } from '../config/index.js';
@@ -72,6 +74,18 @@ const isFrontendPath = (p) => {
     l.includes('/web/') ||
     l.startsWith('ui/') ||
     l.includes('/ui/')
+  );
+};
+
+const isBackendPath = (p) => {
+  const l = (p || '').toLowerCase().replace(/\\/g, '/');
+  return (
+    l.startsWith('backend/') ||
+    l.includes('/backend/') ||
+    l.startsWith('server/') ||
+    l.includes('/server/') ||
+    l.startsWith('api/') ||
+    l.includes('/api/')
   );
 };
 
@@ -273,7 +287,7 @@ export const validateAndInspectZip = (zipFilePath) => {
     webDir = lastSlash !== -1 ? norm.substring(0, lastSlash) : '';
   }
 
-  // Find non-junk package.json candidates sorted by frontend relevance and depth
+  // Find non-junk package.json candidates sorted by frontend relevance, excluding backend-only folders when possible
   const packageJsonCandidates = zipEntries
     .filter(
       (e) =>
@@ -282,13 +296,18 @@ export const validateAndInspectZip = (zipFilePath) => {
         (normalize(e.entryName).endsWith('/package.json') || normalize(e.entryName) === 'package.json')
     )
     .sort((a, b) => {
-      const aFe = isFrontendPath(a.entryName) ? 0 : 1;
-      const bFe = isFrontendPath(b.entryName) ? 0 : 1;
-      if (aFe !== bFe) return aFe - bFe;
+      const aRank = isFrontendPath(a.entryName) ? 0 : isBackendPath(a.entryName) ? 2 : 1;
+      const bRank = isFrontendPath(b.entryName) ? 0 : isBackendPath(b.entryName) ? 2 : 1;
+      if (aRank !== bRank) return aRank - bRank;
       return a.entryName.split(/[\/\\]/).length - b.entryName.split(/[\/\\]/).length;
     });
 
-  const packageJsonEntry = packageJsonCandidates[0] || null;
+  // Ignore backend-only package.json as a frontend build target when a static frontend index.html exists
+  const topPkg = packageJsonCandidates[0] || null;
+  const packageJsonEntry =
+    topPkg && isBackendPath(topPkg.entryName) && indexHtmlEntry && !isBackendPath(indexHtmlEntry.entryName)
+      ? null
+      : topPkg;
 
   let buildDir = '';
   if (packageJsonEntry) {
@@ -1154,7 +1173,316 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
 };
 
 /**
- * Rebuild preview from existing uploaded project file
+ * Parse a GitHub repository URL into owner, repo, and optional branch.
+ */
+export const parseGithubUrl = (rawUrl) => {
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    throw new Error('GitHub URL is required.');
+  }
+
+  let normalized = rawUrl.trim();
+  if (!/^https?:\/\//i.test(normalized)) {
+    normalized = `https://${normalized}`;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error('Invalid GitHub URL format.');
+  }
+
+  if (!/^(www\.)?github\.com$/i.test(parsed.hostname)) {
+    throw new Error('URL must point to github.com (e.g. https://github.com/username/repo).');
+  }
+
+  const parts = parsed.pathname.split('/').filter(Boolean);
+  if (parts.length < 2) {
+    throw new Error('GitHub URL must include owner and repository (e.g. https://github.com/username/repo).');
+  }
+
+  const owner = parts[0];
+  const repo = parts[1].replace(/\.git$/i, '');
+  let branch = null;
+
+  // Support URLs like /owner/repo/tree/branch-name
+  if (parts[2] === 'tree' && parts.length >= 4) {
+    branch = parts.slice(3).join('/');
+  }
+
+  return {
+    owner,
+    repo,
+    branch,
+    repoUrl: `https://github.com/${owner}/${repo}`,
+  };
+};
+
+/**
+ * Parse stored github::owner/repo@branch or github2::fe@b|be@b key from ProductFile.privateStorageKey
+ */
+export const parseGithubStorageKey = (storageKey) => {
+  if (!storageKey) return null;
+
+  const parseSpec = (spec) => {
+    const atIndex = spec.lastIndexOf('@');
+    const repoPart = atIndex !== -1 ? spec.slice(0, atIndex) : spec;
+    const branch = atIndex !== -1 ? spec.slice(atIndex + 1) : 'main';
+    const [owner, repo] = repoPart.split('/');
+    if (!owner || !repo) return null;
+    return { owner, repo, branch: branch || 'main' };
+  };
+
+  if (storageKey.startsWith('github2::')) {
+    const [feSpec = '', beSpec = ''] = storageKey.slice('github2::'.length).split('|');
+    const frontend = parseSpec(feSpec);
+    const backend = parseSpec(beSpec);
+    if (!frontend || !backend) return null;
+    return { mode: 'dual', frontend, backend };
+  }
+
+  if (storageKey.startsWith('github::')) {
+    const single = parseSpec(storageKey.slice('github::'.length));
+    if (!single) return null;
+    return { mode: 'single', ...single };
+  }
+
+  return null;
+};
+
+/**
+ * Fetch repository metadata & default branch from GitHub
+ */
+export const fetchGithubRepoInfo = async (owner, repo, branchOverride = null, token = '') => {
+  const authToken = (token || process.env.GITHUB_TOKEN || '').trim();
+  const headers = {
+    'User-Agent': 'CoderHarbor-PreviewService',
+    Accept: 'application/vnd.github+json',
+  };
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
+
+  const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
+    headers,
+  });
+
+  if (res.status === 404 || res.status === 401) {
+    throw new Error(
+      'GitHub repository not found or is private. For private repos, enter a GitHub Personal Access Token or set GITHUB_TOKEN on the server.'
+    );
+  }
+
+  if (res.ok) {
+    const json = await res.json();
+    return {
+      owner,
+      repo,
+      branch: branchOverride || json.default_branch || 'main',
+      sizeKb: Number(json.size || 0),
+      description: json.description || '',
+      isPrivate: Boolean(json.private),
+      htmlUrl: json.html_url || `https://github.com/${owner}/${repo}`,
+    };
+  }
+
+  // Fallback if unauthenticated GitHub REST API is rate-limited (403)
+  return {
+    owner,
+    repo,
+    branch: branchOverride || 'main',
+    sizeKb: 0,
+    description: '',
+    isPrivate: false,
+    htmlUrl: `https://github.com/${owner}/${repo}`,
+  };
+};
+
+/**
+ * Fetch downloadable ZIP stream from GitHub for both public and token-authorized private repos.
+ */
+export const fetchGithubArchiveResponse = async (owner, repo, branch = 'main', token = '') => {
+  const authToken = (token || process.env.GITHUB_TOKEN || '').trim();
+  const baseHeaders = { 'User-Agent': 'CoderHarbor-ArchiveFetcher' };
+
+  // Prefer codeload for unauthenticated public repos (no API rate limit)
+  const candidates = [];
+  if (authToken) {
+    candidates.push({
+      url: `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${encodeURIComponent(branch)}`,
+      headers: { ...baseHeaders, Authorization: `Bearer ${authToken}`, Accept: 'application/vnd.github+json' },
+    });
+  } else {
+    candidates.push({
+      url: `https://codeload.github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zip/refs/heads/${encodeURIComponent(branch)}`,
+      headers: baseHeaders,
+    });
+    if (branch === 'main') {
+      candidates.push({
+        url: `https://codeload.github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zip/refs/heads/master`,
+        headers: baseHeaders,
+      });
+    }
+    candidates.push({
+      url: `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${encodeURIComponent(branch)}`,
+      headers: { ...baseHeaders, Accept: 'application/vnd.github+json' },
+    });
+  }
+
+  let lastStatus = 0;
+  for (const candidate of candidates) {
+    const res = await fetch(candidate.url, { headers: candidate.headers, redirect: 'follow' });
+    if (res.ok && res.body) {
+      return { response: res, resolvedBranch: candidate.url.endsWith('/master') ? 'master' : branch };
+    }
+    lastStatus = res.status;
+  }
+
+  throw new Error(
+    `Unable to download GitHub archive for ${owner}/${repo} (branch: ${branch}, HTTP ${lastStatus}). Check the repository URL/branch or token permissions.`
+  );
+};
+
+/**
+ * Helper to copy entries from a GitHub downloaded zip into targetZip under prefixFolder (stripping GitHub root wrapper).
+ */
+const appendGithubZipEntries = (sourceZipPath, targetZip, prefixFolder) => {
+  const srcZip = new AdmZip(sourceZipPath);
+  const entries = srcZip.getEntries();
+
+  // Detect GitHub's single top-level wrapper folder (e.g. owner-repo-commitsha/)
+  let wrapperPrefix = '';
+  const topLevels = new Set();
+  for (const e of entries) {
+    const parts = normalize(e.entryName).split('/').filter(Boolean);
+    if (parts.length > 0) topLevels.add(parts[0]);
+  }
+  if (topLevels.size === 1) {
+    wrapperPrefix = `${Array.from(topLevels)[0]}/`;
+  }
+
+  for (const entry of entries) {
+    if (entry.isDirectory) continue;
+    let relPath = normalize(entry.entryName);
+    if (wrapperPrefix && relPath.startsWith(wrapperPrefix)) {
+      relPath = relPath.slice(wrapperPrefix.length);
+    }
+    if (!relPath || isJunkOrVenv(relPath)) continue;
+    targetZip.addFile(`${prefixFolder}/${relPath}`, entry.getData());
+  }
+};
+
+/**
+ * Download a GitHub repo archive to a temporary zip file and return resolved metadata.
+ */
+export const downloadGithubZipToFile = async (githubUrl, destPath, token = '') => {
+  const parsed = parseGithubUrl(githubUrl);
+  const info = await fetchGithubRepoInfo(parsed.owner, parsed.repo, parsed.branch, token);
+  const { response, resolvedBranch } = await fetchGithubArchiveResponse(
+    info.owner,
+    info.repo,
+    info.branch,
+    token
+  );
+
+  fs.mkdirSync(path.dirname(destPath), { recursive: true });
+  await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(destPath));
+  const stat = fs.statSync(destPath);
+
+  return {
+    owner: info.owner,
+    repo: info.repo,
+    branch: resolvedBranch,
+    htmlUrl: info.htmlUrl,
+    archiveBytes: stat.size || Math.max(info.sizeKb * 1024, 1024),
+  };
+};
+
+/**
+ * Merge separate frontend & backend GitHub zip files into a single structured archive (frontend/, backend/).
+ */
+export const mergeGithubZips = (frontendZipPath, backendZipPath, combinedZipPath) => {
+  const combinedZip = new AdmZip();
+  appendGithubZipEntries(frontendZipPath, combinedZip, 'frontend');
+  appendGithubZipEntries(backendZipPath, combinedZip, 'backend');
+  combinedZip.writeZip(combinedZipPath);
+  return combinedZipPath;
+};
+
+/**
+ * Process single or dual (frontend + backend) GitHub repository links to build live template preview WITHOUT storing source ZIPs on disk.
+ */
+export const processGithubRepo = async (productId, githubUrl, options = {}) => {
+  const { token = '', backendGithubUrl = '' } = options;
+  const hasSeparateBackend = Boolean(backendGithubUrl && backendGithubUrl.trim());
+  const suffix = `${productId}_${Date.now()}`;
+  const tempFeZip = path.join(TEMP_BUILDS_DIR, `gh_fe_${suffix}.zip`);
+  const tempBeZip = path.join(TEMP_BUILDS_DIR, `gh_be_${suffix}.zip`);
+  const tempCombinedZip = path.join(TEMP_BUILDS_DIR, `gh_full_${suffix}.zip`);
+
+  try {
+    const fe = await downloadGithubZipToFile(githubUrl, tempFeZip, token);
+
+    if (hasSeparateBackend) {
+      const be = await downloadGithubZipToFile(backendGithubUrl, tempBeZip, token);
+      mergeGithubZips(tempFeZip, tempBeZip, tempCombinedZip);
+      const combinedStat = fs.statSync(tempCombinedZip);
+
+      const previewResult = await processProjectZip(
+        productId,
+        tempCombinedZip,
+        `${fe.repo}-fullstack.zip`
+      );
+
+      return {
+        preview: previewResult,
+        github: {
+          mode: 'dual',
+          owner: fe.owner,
+          repo: fe.repo,
+          branch: fe.branch,
+          displayFilename: `${fe.owner}/${fe.repo}@${fe.branch} + ${be.owner}/${be.repo}@${be.branch}`,
+          originalName: `${fe.repo}-fullstack.zip`,
+          repoUrl: fe.htmlUrl,
+          backendRepoUrl: be.htmlUrl,
+          storageKey: `github2::${fe.owner}/${fe.repo}@${fe.branch}|${be.owner}/${be.repo}@${be.branch}`,
+          archiveBytes: combinedStat.size || fe.archiveBytes + be.archiveBytes,
+        },
+      };
+    }
+
+    const previewResult = await processProjectZip(
+      productId,
+      tempFeZip,
+      `${fe.repo}-${fe.branch}.zip`
+    );
+
+    return {
+      preview: previewResult,
+      github: {
+        mode: 'single',
+        owner: fe.owner,
+        repo: fe.repo,
+        branch: fe.branch,
+        displayFilename: `${fe.owner}/${fe.repo}@${fe.branch}`,
+        originalName: `${fe.repo}-${fe.branch}.zip`,
+        repoUrl: fe.htmlUrl,
+        storageKey: `github::${fe.owner}/${fe.repo}@${fe.branch}`,
+        archiveBytes: fe.archiveBytes,
+      },
+    };
+  } finally {
+    // Always delete temporary GitHub archives so 0 source bytes remain on VPS storage
+    for (const p of [tempFeZip, tempBeZip, tempCombinedZip]) {
+      try {
+        if (fs.existsSync(p)) fs.rmSync(p, { force: true });
+      } catch (_) {}
+    }
+  }
+};
+
+/**
+ * Rebuild preview from existing uploaded project file or linked GitHub repo(s)
  */
 export const rebuildProjectPreview = async (productId) => {
   const latestFile = await prisma.productFile.findFirst({
@@ -1163,7 +1491,27 @@ export const rebuildProjectPreview = async (productId) => {
   });
 
   if (!latestFile) {
-    throw new Error('No uploaded project archive (.zip) found for this project.');
+    throw new Error('No uploaded project archive (.zip) or GitHub link found for this project.');
+  }
+
+  const githubMeta = parseGithubStorageKey(latestFile.privateStorageKey);
+  if (githubMeta) {
+    if (githubMeta.mode === 'dual') {
+      const result = await processGithubRepo(
+        productId,
+        `https://github.com/${githubMeta.frontend.owner}/${githubMeta.frontend.repo}/tree/${githubMeta.frontend.branch}`,
+        {
+          backendGithubUrl: `https://github.com/${githubMeta.backend.owner}/${githubMeta.backend.repo}/tree/${githubMeta.backend.branch}`,
+        }
+      );
+      return result.preview;
+    }
+
+    const result = await processGithubRepo(
+      productId,
+      `https://github.com/${githubMeta.owner}/${githubMeta.repo}/tree/${githubMeta.branch}`
+    );
+    return result.preview;
   }
 
   const zipPath = path.resolve(__dirname, '../../storage/private/projects', latestFile.filename);
