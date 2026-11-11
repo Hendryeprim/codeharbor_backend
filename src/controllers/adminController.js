@@ -285,10 +285,23 @@ export const updateProduct = async (req, res, next) => {
       images,
     } = req.body;
 
+    const currentProduct = await prisma.product.findUnique({ where: { id } });
+    if (!currentProduct) {
+      return res.status(404).json({ success: false, message: 'Product not found.' });
+    }
+
     const data = {};
     if (title) {
-      data.title = title.trim();
-      data.slug = createSlug(title);
+      const trimmedTitle = title.trim();
+      data.title = trimmedTitle;
+      if (trimmedTitle !== currentProduct.title) {
+        let slug = createSlug(trimmedTitle);
+        const existingSlug = await prisma.product.findUnique({ where: { slug } });
+        if (existingSlug && existingSlug.id !== id) {
+          slug = `${slug}-${Date.now().toString().slice(-4)}`;
+        }
+        data.slug = slug;
+      }
     }
     if (shortDescription !== undefined) data.shortDescription = shortDescription.trim();
     if (fullDescription !== undefined) data.fullDescription = fullDescription.trim();
@@ -311,9 +324,13 @@ export const updateProduct = async (req, res, next) => {
 
     // Update technologies if provided
     if (Array.isArray(technologyIds)) {
-      const validTechIds = technologyIds
-        .map((t) => (typeof t === 'object' && t !== null ? t.id || t.technologyId : t))
-        .filter((tId) => typeof tId === 'string' && tId.trim().length > 0);
+      const validTechIds = Array.from(
+        new Set(
+          technologyIds
+            .map((t) => (typeof t === 'object' && t !== null ? t.id || t.technologyId : t))
+            .filter((tId) => typeof tId === 'string' && tId.trim().length > 0)
+        )
+      );
 
       await prisma.productTechnology.deleteMany({ where: { productId: id } });
       if (validTechIds.length > 0) {
@@ -416,8 +433,14 @@ export const updateCategory = async (req, res, next) => {
 
     const data = {};
     if (name) {
-      data.name = name.trim();
-      data.slug = createSlug(name);
+      const trimmedName = name.trim();
+      data.name = trimmedName;
+      let slug = createSlug(trimmedName);
+      const existingCat = await prisma.category.findUnique({ where: { slug } });
+      if (existingCat && existingCat.id !== id) {
+        slug = `${slug}-${Date.now().toString().slice(-4)}`;
+      }
+      data.slug = slug;
     }
     if (description !== undefined) data.description = description;
     if (icon !== undefined) data.icon = icon;
