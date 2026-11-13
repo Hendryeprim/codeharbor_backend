@@ -10,9 +10,50 @@ export const getSandboxInterceptorScript = (productId = '') => {
   // Determine canonical preview subpath prefix e.g. /previews/81f01b3b-11e3-4c4d-bec2-1c23274eca77
   const currentPath = window.location.pathname;
   const match = currentPath.match(/^(\/previews\/[^\/]+)/);
-  const previewPrefix = match ? match[1] : (window.location.pathname.replace(/\\/$/, '') || '');
+  const previewPrefix = match ? match[1] : '';
   window.__ROUTER_BASENAME__ = previewPrefix;
 
+  // ─── LOCATION SHIM ──────────────────────────────────────────────────────────
+  // React Router reads window.location.pathname to determine the current route.
+  // Since preview is served at /previews/:id/, React Router sees that path and
+  // throws "No routes matched location /previews/:id/".
+  // We shim window.location so it appears to serve from / (root),
+  // while the real browser URL still stays at /previews/:id/ for asset loading.
+  if (previewPrefix) {
+    try {
+      // Compute the "virtual" relative path as seen by the app (strip previewPrefix)
+      const getVirtualPath = () => {
+        const p = window.location.pathname;
+        return p.startsWith(previewPrefix) ? (p.slice(previewPrefix.length) || '/') : (p || '/');
+      };
+
+      // Create a Proxy for window.location that overrides pathname/href to strip previewPrefix
+      const realLocation = window.location;
+      const locationProxy = new Proxy(realLocation, {
+        get(target, prop) {
+          if (prop === 'pathname') return getVirtualPath();
+          if (prop === 'href') return target.origin + getVirtualPath() + target.search + target.hash;
+          const val = target[prop];
+          return typeof val === 'function' ? val.bind(target) : val;
+        }
+      });
+
+      // Override window.location with our proxy
+      try {
+        Object.defineProperty(window, 'location', {
+          get: () => locationProxy,
+          configurable: true
+        });
+      } catch (defErr) {
+        // Some browsers disallow redefining window.location; fall back to basename approach
+        console.warn('[Sandbox] location proxy unavailable, using basename fallback:', defErr.message);
+      }
+    } catch (shimErr) {
+      console.warn('[Sandbox] Location shim error:', shimErr.message);
+    }
+  }
+
+  // ─── HISTORY API WRAP ───────────────────────────────────────────────────────
   // Intercept HTML5 History API so SPA client-side navigations (e.g. navigate('/jobs'))
   // stay contained within the /previews/:id/ sandbox subpath rather than navigating to domain root
   try {
@@ -37,14 +78,16 @@ export const getSandboxInterceptorScript = (productId = '') => {
       return origReplaceState.apply(this, [state, title, url]);
     };
 
-    // Initialize state.masked so React Router / Remix matches root path when loaded directly
-    const relPath = (currentPath.startsWith(previewPrefix) ? currentPath.slice(previewPrefix.length) : currentPath) || '/';
-    const currentState = history.state || {};
-    if (!currentState.masked) {
-      origReplaceState.call(history, {
-        ...currentState,
-        masked: { pathname: relPath, search: window.location.search, hash: window.location.hash }
-      }, '', window.location.href);
+    // Normalize current history entry so React Router starts at virtual root
+    if (previewPrefix) {
+      const currentState = history.state || {};
+      if (!currentState.__sandboxNormalized) {
+        const virtualPath = window.location.pathname; // already shimmed to relative
+        origReplaceState.call(history, {
+          ...currentState,
+          __sandboxNormalized: true
+        }, '', window.location.href);
+      }
     }
   } catch (histErr) {
     console.warn('[Sandbox] History interceptor warning:', histErr.message);

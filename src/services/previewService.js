@@ -925,7 +925,7 @@ ${escapeHtml(readmeContent || fullDesc || 'Project codebase is verified and read
 
   // Inject sandbox interceptor
   try {
-    const interceptor = getSandboxInterceptorScript();
+    const interceptor = getSandboxInterceptorScript(productId);
     let finalHtml = fs.readFileSync(indexPath, 'utf8');
     finalHtml = finalHtml.replace('<head>', `<head>\n${interceptor}`);
     fs.writeFileSync(indexPath, finalHtml, 'utf8');
@@ -1161,13 +1161,13 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
           html = html.replace(/(href|src)="\/(assets|favicon|logo|full-logo|icons|static)/g, '$1="./$2');
           html = html.replace(/(href|src)='\/ (assets|favicon|logo|full-logo|icons|static)/g, "$1='./$2");
 
-          if (!html.includes('coderharbor-preview-sandbox')) {
-            const interceptor = getSandboxInterceptorScript();
-            if (html.includes('<head>')) {
-              html = html.replace('<head>', `<head>\n${interceptor}`);
-            } else {
-              html = `${interceptor}\n${html}`;
-            }
+          // Remove any previously injected (possibly outdated) interceptor, then re-inject latest
+          html = html.replace(/<script id="coderharbor-preview-sandbox">[\s\S]*?<\/script>\n?/g, '');
+          const interceptor = getSandboxInterceptorScript(productId);
+          if (html.includes('<head>')) {
+            html = html.replace('<head>', `<head>\n${interceptor}`);
+          } else {
+            html = `${interceptor}\n${html}`;
           }
           fs.writeFileSync(distIndexPath, html, 'utf8');
         }
@@ -1266,17 +1266,24 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
         }
 
         // Inject client-side sandbox interceptor for API-driven features
+        // Always replace old interceptor with the latest version (supports __ROUTER_BASENAME__)
         try {
           let htmlContent = fs.readFileSync(indexPath, 'utf8');
-          if (!htmlContent.includes('coderharbor-preview-sandbox')) {
-            const interceptor = getSandboxInterceptorScript();
+          // Remove any previously injected (possibly outdated) interceptor
+          htmlContent = htmlContent.replace(/<script id="coderharbor-preview-sandbox">[\s\S]*?<\/script>\n?/g, '');
+          // Add base href for subpath asset resolution
+          if (!htmlContent.includes('<base ') && !htmlContent.includes('<base>')) {
             if (htmlContent.includes('<head>')) {
-              htmlContent = htmlContent.replace('<head>', `<head>\n${interceptor}`);
-            } else {
-              htmlContent = `${interceptor}\n${htmlContent}`;
+              htmlContent = htmlContent.replace('<head>', `<head>\n  <base href="/previews/${productId}/">`);
             }
-            fs.writeFileSync(indexPath, htmlContent, 'utf8');
           }
+          const interceptor = getSandboxInterceptorScript(productId);
+          if (htmlContent.includes('<head>')) {
+            htmlContent = htmlContent.replace('<head>', `<head>\n${interceptor}`);
+          } else {
+            htmlContent = `${interceptor}\n${htmlContent}`;
+          }
+          fs.writeFileSync(indexPath, htmlContent, 'utf8');
         } catch (injectErr) {
           console.warn('Sandbox interceptor injection skipped:', injectErr.message);
         }
