@@ -29,6 +29,7 @@ const app = express();
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    frameguard: false,
   })
 );
 
@@ -90,6 +91,7 @@ app.use(
     }
 
     // Security & Embedding Headers
+    res.removeHeader('X-Frame-Options');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader(
       'Content-Security-Policy',

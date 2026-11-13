@@ -10,6 +10,7 @@ import {
   toggleProjectPreview,
 } from '../services/previewService.js';
 import { PRIVATE_STORAGE_DIR } from '../middleware/upload.js';
+import { normalizePreviewUrl } from './productController.js';
 
 export const getDashboardStats = async (req, res, next) => {
   try {
@@ -109,6 +110,7 @@ export const getAdminProducts = async (req, res, next) => {
       price: Number(p.price),
       viewPrice: Number(p.viewPrice || 0),
       isViewFree: p.isViewFree ?? true,
+      previewUrl: normalizePreviewUrl(p.previewUrl, p.id),
       technologies: p.technologies.map((t) => t.technology),
       files: p.files.map((f) => ({ ...f, fileSize: Number(f.fileSize) })),
     }));
@@ -151,6 +153,7 @@ export const getAdminProductById = async (req, res, next) => {
         price: Number(product.price),
         viewPrice: Number(product.viewPrice || 0),
         isViewFree: product.isViewFree ?? true,
+        previewUrl: normalizePreviewUrl(product.previewUrl, product.id),
         technologies: product.technologies.map((t) => t.technology),
         files: product.files.map((f) => ({ ...f, fileSize: Number(f.fileSize) })),
       },

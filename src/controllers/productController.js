@@ -1,6 +1,18 @@
 import prisma from '../database/prisma.js';
 import { getCache, setCache } from '../utils/cache.js';
 
+export const normalizePreviewUrl = (url, productId) => {
+  if (!url) return null;
+  const isProd =
+    process.env.NODE_ENV === 'production' ||
+    (process.env.FRONTEND_URL && process.env.FRONTEND_URL.includes('coderharbor.com')) ||
+    (process.env.BACKEND_PUBLIC_URL && process.env.BACKEND_PUBLIC_URL.includes('coderharbor.com'));
+  if (isProd && (url.includes('localhost') || url.includes('127.0.0.1'))) {
+    return `https://api.coderharbor.com/previews/${productId}/`;
+  }
+  return url;
+};
+
 export const getProducts = async (req, res, next) => {
   try {
     const cacheKey = `products_${req.originalUrl}`;
@@ -108,6 +120,7 @@ export const getProducts = async (req, res, next) => {
       price: Number(p.price),
       viewPrice: Number(p.viewPrice || 0),
       isViewFree: p.isViewFree ?? true,
+      previewUrl: normalizePreviewUrl(p.previewUrl, p.id),
       technologies: p.technologies.map((t) => t.technology),
     }));
 
@@ -162,6 +175,7 @@ export const getFeaturedProducts = async (req, res, next) => {
       price: Number(p.price),
       viewPrice: Number(p.viewPrice || 0),
       isViewFree: p.isViewFree ?? true,
+      previewUrl: normalizePreviewUrl(p.previewUrl, p.id),
       technologies: p.technologies.map((t) => t.technology),
     }));
 
@@ -237,6 +251,7 @@ export const getProductBySlug = async (req, res, next) => {
       price: Number(product.price),
       viewPrice: Number(product.viewPrice || 0),
       isViewFree: product.isViewFree ?? true,
+      previewUrl: normalizePreviewUrl(product.previewUrl, product.id),
       technologies: product.technologies.map((t) => t.technology),
       files: product.files.map((f) => ({
         ...f,

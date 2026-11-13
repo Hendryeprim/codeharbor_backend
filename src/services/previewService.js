@@ -28,8 +28,11 @@ export const getPreviewUrl = (productId) => {
   if (process.env.PREVIEW_BASE_URL) {
     return `${process.env.PREVIEW_BASE_URL.replace(/\/$/, '')}/${productId}/`;
   }
+  if (process.env.BACKEND_PUBLIC_URL) {
+    return `${process.env.BACKEND_PUBLIC_URL.replace(/\/$/, '')}/previews/${productId}/`;
+  }
   const frontendUrl = process.env.FRONTEND_URL || '';
-  if (frontendUrl.includes('coderharbor.com')) {
+  if (frontendUrl.includes('coderharbor.com') || process.env.NODE_ENV === 'production' || !frontendUrl.includes('localhost')) {
     return `https://api.coderharbor.com/previews/${productId}/`;
   }
   const port = process.env.PORT || 5050;
