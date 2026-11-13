@@ -474,6 +474,23 @@ const copyDirectory = (src, dest) => {
  * instead of 'No routes matched location /previews/...'
  */
 export const patchProjectForSubpathRouting = (targetDir, productId) => {
+  if (!fs.existsSync(targetDir)) return;
+
+  // Collect all static assets present in this preview directory (images, icons, fonts, json)
+  const staticAssets = [];
+  const collectAssets = (d, rel = '') => {
+    if (!fs.existsSync(d)) return;
+    for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+      const r = rel ? `${rel}/${ent.name}` : ent.name;
+      if (ent.isDirectory() && ent.name !== 'node_modules') {
+        collectAssets(path.join(d, ent.name), r);
+      } else if (ent.isFile() && /\.(png|jpe?g|svg|gif|ico|webp|avif|json|woff2?|ttf|eot)$/i.test(ent.name)) {
+        staticAssets.push(r.replace(/\\/g, '/'));
+      }
+    }
+  };
+  collectAssets(targetDir);
+
   const scanAndPatch = (dir) => {
     if (!fs.existsSync(dir)) return;
     const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -482,7 +499,7 @@ export const patchProjectForSubpathRouting = (targetDir, productId) => {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         scanAndPatch(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith('.js')) {
+      } else if (entry.isFile() && (entry.name.endsWith('.js') || entry.name.endsWith('.html'))) {
         try {
           let code = fs.readFileSync(fullPath, 'utf8');
           let changed = false;
@@ -512,6 +529,17 @@ export const patchProjectForSubpathRouting = (targetDir, productId) => {
           if (/createBrowserHistory\s*\(\s*\{/.test(code) && !code.includes('basename:window.__ROUTER_BASENAME__')) {
             code = code.replace(/createBrowserHistory\s*\(\s*\{/g, 'createBrowserHistory({basename:window.__ROUTER_BASENAME__,');
             changed = true;
+          }
+
+          // 5. Rewrite hardcoded root-relative asset strings to preview subpath
+          // e.g. "/logo.png" -> "/previews/<productId>/logo.png"
+          for (const asset of staticAssets) {
+            const escaped = asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const assetRegex = new RegExp(`(["'\`])\\/${escaped}\\1`, 'g');
+            if (assetRegex.test(code)) {
+              code = code.replace(assetRegex, `$1/previews/${productId}/${asset}$1`);
+              changed = true;
+            }
           }
 
           if (changed) {

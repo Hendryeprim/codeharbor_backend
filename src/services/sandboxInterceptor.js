@@ -39,6 +39,37 @@ export const getSandboxInterceptorScript = (productId = '') => {
     console.warn('[Sandbox] History wrap error:', histErr && histErr.message);
   }
 
+  // ─── IMAGE & ASSET SUBPATH CONTAINMENT ──────────────────────────────────────
+  // Automatically rewrite absolute asset paths (like /logo.png, /favicon.ico)
+  // so they point to /previews/:id/ instead of the domain root.
+  if (previewPrefix) {
+    try {
+      var origImageSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+      if (origImageSrcDescriptor && origImageSrcDescriptor.set) {
+        Object.defineProperty(HTMLImageElement.prototype, 'src', {
+          set: function(val) {
+            if (typeof val === 'string' && val.charAt(0) === '/' && val.indexOf(previewPrefix) !== 0 && val.indexOf('//') !== 0) {
+              val = previewPrefix + val;
+            }
+            return origImageSrcDescriptor.set.call(this, val);
+          },
+          get: origImageSrcDescriptor.get,
+          configurable: true
+        });
+      }
+
+      var origSetAttr = Element.prototype.setAttribute;
+      Element.prototype.setAttribute = function(name, val) {
+        if (name && (name.toLowerCase() === 'src' || name.toLowerCase() === 'href') && typeof val === 'string' && val.charAt(0) === '/' && val.indexOf(previewPrefix) !== 0 && val.indexOf('//') !== 0) {
+          val = previewPrefix + val;
+        }
+        return origSetAttr.call(this, name, val);
+      };
+    } catch (assetErr) {
+      console.warn('[Sandbox] Asset rewrite warning:', assetErr && assetErr.message);
+    }
+  }
+
   const origFetch = window.fetch;
   const storage = window.localStorage;
 
