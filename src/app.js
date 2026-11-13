@@ -70,6 +70,29 @@ const authLimiter = rateLimit({
 // Serve only public images statically - strictly never private archives
 app.use('/uploads/images', express.static(PUBLIC_UPLOADS_DIR));
 
+// ─── PREVIEW ASSET RESOLVER (FOR ABSOLUTE PATHS LIKE /logo.png) ─────────────
+// Many frontend SPAs reference assets with absolute paths like `/logo.png`,
+// `/favicon.ico`, `/images/bg.jpg` instead of relative paths `./logo.png`.
+// When loaded inside an iframe at `/previews/:productId/`, the browser asks for
+// `api.coderharbor.com/logo.png`.
+// We inspect the Referer header to automatically route the asset request to the
+// corresponding project's preview folder!
+app.use((req, res, next) => {
+  const referer = req.headers.referer || '';
+  const match = referer.match(/\/previews\/([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) {
+    const productId = match[1];
+    // Avoid intercepting actual API requests
+    if (!req.path.startsWith('/api') && !req.path.startsWith('/previews') && !req.path.startsWith('/uploads')) {
+      const candidatePath = path.join(PREVIEWS_DIR, productId, req.path);
+      if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).isFile()) {
+        return res.sendFile(candidatePath);
+      }
+    }
+  }
+  next();
+});
+
 // Serve isolated live preview projects with sandboxed security headers
 app.use(
   '/previews/:productId',
