@@ -101,7 +101,17 @@ app.use(
   },
   (req, res, next) => {
     const previewPath = path.join(PREVIEWS_DIR, req.params.productId);
-    express.static(previewPath)(req, res, next);
+    express.static(previewPath)(req, res, () => {
+      // SPA Fallback: If not a direct asset file with extension, serve index.html
+      const hasExt = Boolean(path.extname(req.path));
+      if (!hasExt) {
+        const indexPath = path.join(previewPath, 'index.html');
+        if (fs.existsSync(indexPath)) {
+          return res.sendFile(indexPath);
+        }
+      }
+      next();
+    });
   }
 );
 

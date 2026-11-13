@@ -4,9 +4,52 @@
  * like Registration, Login, Dashboard Analytics, and Forms directly
  * in the live preview iframe without requiring an external database server.
  */
-export const getSandboxInterceptorScript = () => {
+export const getSandboxInterceptorScript = (productId = '') => {
   return `<script id="coderharbor-preview-sandbox">
 (function() {
+  // Determine canonical preview subpath prefix e.g. /previews/81f01b3b-11e3-4c4d-bec2-1c23274eca77
+  const currentPath = window.location.pathname;
+  const match = currentPath.match(/^(\/previews\/[^\/]+)/);
+  const previewPrefix = match ? match[1] : (window.location.pathname.replace(/\\/$/, '') || '');
+  window.__ROUTER_BASENAME__ = previewPrefix;
+
+  // Intercept HTML5 History API so SPA client-side navigations (e.g. navigate('/jobs'))
+  // stay contained within the /previews/:id/ sandbox subpath rather than navigating to domain root
+  try {
+    const origPushState = history.pushState;
+    const origReplaceState = history.replaceState;
+
+    history.pushState = function(state, title, url) {
+      if (url && typeof url === 'string') {
+        if (url.startsWith('/') && !url.startsWith(previewPrefix)) {
+          url = previewPrefix + url;
+        }
+      }
+      return origPushState.apply(this, [state, title, url]);
+    };
+
+    history.replaceState = function(state, title, url) {
+      if (url && typeof url === 'string') {
+        if (url.startsWith('/') && !url.startsWith(previewPrefix)) {
+          url = previewPrefix + url;
+        }
+      }
+      return origReplaceState.apply(this, [state, title, url]);
+    };
+
+    // Initialize state.masked so React Router / Remix matches root path when loaded directly
+    const relPath = (currentPath.startsWith(previewPrefix) ? currentPath.slice(previewPrefix.length) : currentPath) || '/';
+    const currentState = history.state || {};
+    if (!currentState.masked) {
+      origReplaceState.call(history, {
+        ...currentState,
+        masked: { pathname: relPath, search: window.location.search, hash: window.location.hash }
+      }, '', window.location.href);
+    }
+  } catch (histErr) {
+    console.warn('[Sandbox] History interceptor warning:', histErr.message);
+  }
+
   const origFetch = window.fetch;
   const storage = window.localStorage;
 

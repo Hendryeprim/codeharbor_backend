@@ -469,6 +469,65 @@ const copyDirectory = (src, dest) => {
 };
 
 /**
+ * Automatically patches bundled JavaScript assets (React Router, Vue Router, etc.)
+ * to adopt the sandbox subpath basename so any uploaded project renders its real routes
+ * instead of 'No routes matched location /previews/...'
+ */
+export const patchProjectForSubpathRouting = (targetDir, productId) => {
+  const scanAndPatch = (dir) => {
+    if (!fs.existsSync(dir)) return;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        scanAndPatch(fullPath);
+      } else if (entry.isFile() && entry.name.endsWith('.js')) {
+        try {
+          let code = fs.readFileSync(fullPath, 'utf8');
+          let changed = false;
+
+          // 1. React Router v6 & v7 basename defaults: basename:e=`/` or basename:e="/"
+          if (/basename:([a-zA-Z0-9_$]+)=[`'"]\/[`'"]/.test(code)) {
+            code = code.replace(/basename:([a-zA-Z0-9_$]+)=[`'"]\/[`'"]/g, 'basename:$1=(window.__ROUTER_BASENAME__||"/")');
+            changed = true;
+          }
+
+          // 2. React Router BrowserRouter function definition: function kn({basename:e
+          if (/function\s+([a-zA-Z0-9_$]+)\s*\(\s*\{\s*basename:([a-zA-Z0-9_$]+)\s*,/.test(code)) {
+            code = code.replace(
+              /function\s+([a-zA-Z0-9_$]+)\s*\(\s*\{\s*basename:([a-zA-Z0-9_$]+)\s*,/g,
+              'function $1({basename:$2=(window.__ROUTER_BASENAME__||"/"),'
+            );
+            changed = true;
+          }
+
+          // 3. Vue Router createWebHistory()
+          if (/createWebHistory\s*\(([^)]*)\)/.test(code)) {
+            code = code.replace(/createWebHistory\s*\(([^)]*)\)/g, 'createWebHistory(window.__ROUTER_BASENAME__||$1)');
+            changed = true;
+          }
+
+          // 4. createBrowserHistory({ ... })
+          if (/createBrowserHistory\s*\(\s*\{/.test(code) && !code.includes('basename:window.__ROUTER_BASENAME__')) {
+            code = code.replace(/createBrowserHistory\s*\(\s*\{/g, 'createBrowserHistory({basename:window.__ROUTER_BASENAME__,');
+            changed = true;
+          }
+
+          if (changed) {
+            fs.writeFileSync(fullPath, code, 'utf8');
+          }
+        } catch (err) {
+          console.warn(`[PreviewService] Failed to patch ${entry.name} for subpath routing:`, err.message);
+        }
+      }
+    }
+  };
+
+  scanAndPatch(targetDir);
+};
+
+/**
  * Execute command with timeout and environment variable isolation
  */
 const runIsolatedCommand = (cmd, args, cwd, timeoutMs = 300000) => {
@@ -1117,6 +1176,9 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
         cleanDirectory(targetPreviewDir);
         copyDirectory(distDir, targetPreviewDir);
 
+        // Auto-patch bundled routers for subpath sandbox mounting
+        patchProjectForSubpathRouting(targetPreviewDir, productId);
+
         // 6. Cleanup sandbox
         cleanDirectory(tempBuildDir);
 
@@ -1218,6 +1280,9 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
         } catch (injectErr) {
           console.warn('Sandbox interceptor injection skipped:', injectErr.message);
         }
+
+        // Auto-patch bundled routers for subpath sandbox mounting
+        patchProjectForSubpathRouting(targetPreviewDir, productId);
 
         const previewUrl = getPreviewUrl(productId);
 
