@@ -1,15 +1,22 @@
 import prisma from '../database/prisma.js';
 import { getCache, setCache } from '../utils/cache.js';
 
-export const normalizePreviewUrl = (url, productId) => {
+export const normalizePreviewUrl = (url, productId, req = null) => {
   if (!url) return null;
-  const isProd =
-    process.env.NODE_ENV === 'production' ||
-    (process.env.FRONTEND_URL && process.env.FRONTEND_URL.includes('coderharbor.com')) ||
-    (process.env.BACKEND_PUBLIC_URL && process.env.BACKEND_PUBLIC_URL.includes('coderharbor.com'));
-  if (isProd && (url.includes('localhost') || url.includes('127.0.0.1'))) {
+  const host = req?.headers?.host || (req?.get ? req.get('host') : '') || '';
+  const isLocalHost = host.startsWith('localhost') || host.startsWith('127.0.0.1');
+
+  // If running in purely local dev environment, keep localhost
+  if (process.env.IS_LOCAL_DEV === 'true' && isLocalHost) {
+    return url;
+  }
+
+  // In production (aaPanel, coderharbor.com) or whenever accessed through a non-local client:
+  // Convert any localhost / 127.0.0.1 or port 5050 url to the canonical public preview endpoint
+  if (url.includes('localhost') || url.includes('127.0.0.1') || url.includes(':5050')) {
     return `https://api.coderharbor.com/previews/${productId}/`;
   }
+
   return url;
 };
 
@@ -120,7 +127,7 @@ export const getProducts = async (req, res, next) => {
       price: Number(p.price),
       viewPrice: Number(p.viewPrice || 0),
       isViewFree: p.isViewFree ?? true,
-      previewUrl: normalizePreviewUrl(p.previewUrl, p.id),
+      previewUrl: normalizePreviewUrl(p.previewUrl, p.id, req),
       technologies: p.technologies.map((t) => t.technology),
     }));
 
@@ -175,7 +182,7 @@ export const getFeaturedProducts = async (req, res, next) => {
       price: Number(p.price),
       viewPrice: Number(p.viewPrice || 0),
       isViewFree: p.isViewFree ?? true,
-      previewUrl: normalizePreviewUrl(p.previewUrl, p.id),
+      previewUrl: normalizePreviewUrl(p.previewUrl, p.id, req),
       technologies: p.technologies.map((t) => t.technology),
     }));
 
@@ -251,7 +258,7 @@ export const getProductBySlug = async (req, res, next) => {
       price: Number(product.price),
       viewPrice: Number(product.viewPrice || 0),
       isViewFree: product.isViewFree ?? true,
-      previewUrl: normalizePreviewUrl(product.previewUrl, product.id),
+      previewUrl: normalizePreviewUrl(product.previewUrl, product.id, req),
       technologies: product.technologies.map((t) => t.technology),
       files: product.files.map((f) => ({
         ...f,

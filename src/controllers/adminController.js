@@ -110,7 +110,7 @@ export const getAdminProducts = async (req, res, next) => {
       price: Number(p.price),
       viewPrice: Number(p.viewPrice || 0),
       isViewFree: p.isViewFree ?? true,
-      previewUrl: normalizePreviewUrl(p.previewUrl, p.id),
+      previewUrl: normalizePreviewUrl(p.previewUrl, p.id, req),
       technologies: p.technologies.map((t) => t.technology),
       files: p.files.map((f) => ({ ...f, fileSize: Number(f.fileSize) })),
     }));
@@ -153,7 +153,7 @@ export const getAdminProductById = async (req, res, next) => {
         price: Number(product.price),
         viewPrice: Number(product.viewPrice || 0),
         isViewFree: product.isViewFree ?? true,
-        previewUrl: normalizePreviewUrl(product.previewUrl, product.id),
+        previewUrl: normalizePreviewUrl(product.previewUrl, product.id, req),
         technologies: product.technologies.map((t) => t.technology),
         files: product.files.map((f) => ({ ...f, fileSize: Number(f.fileSize) })),
       },
