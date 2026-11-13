@@ -131,6 +131,13 @@ export const consolidateArchiveIfNested = (zipFilePath) => {
     // 2. Unpack each nested zip into structured folders (frontend/, backend/, etc.)
     for (const entry of nestedZipEntries) {
       const entryNameLower = entry.entryName.toLowerCase();
+
+      // If this is a precompiled production bundle (dist.zip, build.zip), preserve the file itself
+      // so downstream preview extractors can read it directly as well.
+      if (entryNameLower.endsWith('dist.zip') || entryNameLower.endsWith('build.zip')) {
+        consolidatedZip.addFile(entry.entryName, entry.getData());
+      }
+
       let targetFolder = '';
 
       if (
@@ -179,6 +186,8 @@ export const consolidateArchiveIfNested = (zipFilePath) => {
           }
         }
 
+        const isDistOrBuildZip = entryNameLower.endsWith('dist.zip') || entryNameLower.endsWith('build.zip');
+
         for (const ie of innerEntries) {
           if (ie.isDirectory || isJunkOrVenv(ie.entryName)) continue;
           let relPath = ie.entryName;
@@ -187,7 +196,9 @@ export const consolidateArchiveIfNested = (zipFilePath) => {
           }
           if (!relPath) continue;
 
-          const finalPath = `${targetFolder}/${relPath}`.replace(/\\/g, '/');
+          // For pre-built distribution zips, place entries into targetFolder/dist/ so dist/index.html is created cleanly
+          const subFolder = isDistOrBuildZip ? (targetFolder ? `${targetFolder}/dist` : 'dist') : targetFolder;
+          const finalPath = `${subFolder}/${relPath}`.replace(/\\/g, '/');
           consolidatedZip.addFile(finalPath, ie.getData());
         }
       } catch (innerErr) {
@@ -991,6 +1002,7 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
             path.join(projectRoot, 'build'),
             path.join(tempBuildDir, 'dist'),
             path.join(tempBuildDir, 'frontend', 'dist'),
+            path.join(tempBuildDir, 'frontend', 'build'),
             path.join(tempBuildDir, 'client', 'dist'),
             path.join(tempBuildDir, 'web', 'dist'),
           ];
@@ -999,6 +1011,26 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
               prebuiltDistDir = cdir;
               logs += `✓ Detected pre-compiled production assets in ${path.basename(cdir)}/ directory.\n`;
               break;
+            }
+          }
+        }
+
+        // If still not found, check if the HTML directly in projectRoot or frontend/ is already a compiled production bundle
+        if (!prebuiltDistDir) {
+          const checkDirs = [projectRoot, path.join(tempBuildDir, 'frontend'), tempBuildDir];
+          for (const d of checkDirs) {
+            const htmlP = path.join(d, 'index.html');
+            if (fs.existsSync(htmlP)) {
+              const htmlContent = fs.readFileSync(htmlP, 'utf8');
+              const isCompiledHtml =
+                (htmlContent.includes('/assets/') || htmlContent.includes('./assets/') || htmlContent.includes('assets/')) &&
+                !htmlContent.includes('/src/main.') &&
+                !htmlContent.includes('src="/src/');
+              if (isCompiledHtml) {
+                prebuiltDistDir = d;
+                logs += `✓ Detected ready-to-run compiled web application in ${path.basename(d) || 'root'}.\n`;
+                break;
+              }
             }
           }
         }
@@ -1056,6 +1088,15 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
         const distIndexPath = path.join(distDir, 'index.html');
         if (fs.existsSync(distIndexPath)) {
           let html = fs.readFileSync(distIndexPath, 'utf8');
+
+          // Ensure base tag points to the preview sandbox folder so all chunk imports and assets load seamlessly
+          if (!html.includes('<base ') && !html.includes('<base>')) {
+            if (html.includes('<head>')) {
+              html = html.replace('<head>', `<head>\n  <base href="/previews/${productId}/">`);
+            } else {
+              html = `<base href="/previews/${productId}/">\n${html}`;
+            }
+          }
 
           // Rewrite absolute root asset URLs to relative for /previews/:id/ hosting
           html = html.replace(/(href|src)="\/(assets|favicon|logo|full-logo|icons|static)/g, '$1="./$2');
