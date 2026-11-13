@@ -1084,7 +1084,15 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
               const isCompiledHtml =
                 (htmlContent.includes('/assets/') || htmlContent.includes('./assets/') || htmlContent.includes('assets/')) &&
                 !htmlContent.includes('/src/main.') &&
-                !htmlContent.includes('src="/src/');
+                !htmlContent.includes('src="/src/') &&
+                !htmlContent.includes('src="/main.tsx') &&
+                !htmlContent.includes('src="/main.jsx') &&
+                !htmlContent.includes('src="/main.ts') &&
+                !htmlContent.includes('src="./main.tsx') &&
+                !htmlContent.includes('src="./main.jsx') &&
+                !htmlContent.includes('.tsx"') &&
+                !htmlContent.includes('.jsx"') &&
+                !htmlContent.includes("type=\"module\" src=\"/index.");
               if (isCompiledHtml) {
                 prebuiltDistDir = d;
                 logs += `✓ Detected ready-to-run compiled web application in ${path.basename(d) || 'root'}.\n`;
