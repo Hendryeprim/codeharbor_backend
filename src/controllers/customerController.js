@@ -1,7 +1,9 @@
 import path from 'path';
 import fs from 'fs';
-import { Readable } from 'stream';
-import { pipeline } from 'stream/promises';
+import { Readable, pipeline as _pipeline } from 'stream';
+import { promisify } from 'util';
+const pipeline = promisify(_pipeline);
+const toNodeStream = (webStream) => (typeof Readable.fromWeb === 'function' ? Readable.fromWeb(webStream) : Readable.from(webStream));
 import bcrypt from 'bcryptjs';
 import prisma from '../database/prisma.js';
 import { PRIVATE_STORAGE_DIR } from '../middleware/upload.js';
@@ -347,7 +349,7 @@ export const downloadFreeProduct = async (req, res, next) => {
       );
       res.setHeader('Content-Type', 'application/zip');
 
-      await pipeline(Readable.fromWeb(response.body), res);
+      await pipeline(toNodeStream(response.body), res);
       return;
     }
 

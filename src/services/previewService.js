@@ -2,8 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
-import { Readable } from 'stream';
-import { pipeline } from 'stream/promises';
+import { Readable, pipeline as _pipeline } from 'stream';
+import { promisify } from 'util';
+const pipeline = promisify(_pipeline);
+const toNodeStream = (webStream) => (typeof Readable.fromWeb === 'function' ? Readable.fromWeb(webStream) : Readable.from(webStream));
 import AdmZip from 'adm-zip';
 import prisma from '../database/prisma.js';
 import { config } from '../config/index.js';
@@ -1386,7 +1388,7 @@ export const downloadGithubZipToFile = async (githubUrl, destPath, token = '') =
   );
 
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
-  await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(destPath));
+  await pipeline(toNodeStream(response.body), fs.createWriteStream(destPath));
   const stat = fs.statSync(destPath);
 
   return {
