@@ -944,37 +944,111 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
           }
         }
 
-        logs += `Installing build dependencies in isolated sandbox...\n`;
-        await prisma.product.update({
-          where: { id: productId },
-          data: { previewBuildLogs: logs, previewUpdatedAt: new Date() },
-        });
+        // 0. High-Priority Pre-Built Bundle Detection:
+        // If the repository already includes a pre-compiled dist.zip / build.zip or dist/ directory,
+        // use it directly so users see the authentic, real live application immediately.
+        let prebuiltDistDir = null;
 
-        // 1. Install dependencies (including devDependencies like vite, tailwind)
-        await runIsolatedCommand(
-          'npm',
-          ['install', '--include=dev', '--prefer-offline', '--no-audit'],
-          projectRoot,
-          300000
-        );
-        logs += `✓ Dependencies installed.\nRunning production build (npm run build)...\n`;
+        const candidateZips = [
+          path.join(projectRoot, 'dist.zip'),
+          path.join(projectRoot, 'build.zip'),
+          path.join(tempBuildDir, 'dist.zip'),
+          path.join(tempBuildDir, 'frontend', 'dist.zip'),
+          path.join(tempBuildDir, 'client', 'dist.zip'),
+          path.join(tempBuildDir, 'web', 'dist.zip'),
+        ];
 
-        await prisma.product.update({
-          where: { id: productId },
-          data: { previewBuildLogs: logs, previewUpdatedAt: new Date() },
-        });
-
-        // 2. Build production assets
-        await runIsolatedCommand('npm', ['run', 'build'], projectRoot, 300000);
-        logs += `✓ Production build completed.\n`;
-
-        // 3. Locate dist or build directory
-        let distDir = path.join(projectRoot, 'dist');
-        if (!fs.existsSync(distDir) || !fs.existsSync(path.join(distDir, 'index.html'))) {
-          distDir = path.join(projectRoot, 'build');
+        for (const czip of candidateZips) {
+          if (fs.existsSync(czip)) {
+            try {
+              const pz = new AdmZip(czip);
+              const pzEntries = pz.getEntries();
+              if (pzEntries.some((e) => normalize(e.entryName).endsWith('index.html'))) {
+                const extractedPrebuilt = path.join(tempBuildDir, '_extracted_prebuilt_dist');
+                pz.extractAllTo(extractedPrebuilt, true);
+                if (fs.existsSync(path.join(extractedPrebuilt, 'dist', 'index.html'))) {
+                  prebuiltDistDir = path.join(extractedPrebuilt, 'dist');
+                } else if (fs.existsSync(path.join(extractedPrebuilt, 'build', 'index.html'))) {
+                  prebuiltDistDir = path.join(extractedPrebuilt, 'build');
+                } else if (fs.existsSync(path.join(extractedPrebuilt, 'index.html'))) {
+                  prebuiltDistDir = extractedPrebuilt;
+                }
+                if (prebuiltDistDir) {
+                  logs += `✓ Detected and extracted pre-compiled production bundle (${path.basename(czip)}).\n`;
+                  break;
+                }
+              }
+            } catch (err) {
+              console.warn('Pre-built zip extraction error:', err.message);
+            }
+          }
         }
 
-        if (!fs.existsSync(distDir) || !fs.existsSync(path.join(distDir, 'index.html'))) {
+        // Check if pre-compiled dist/ or build/ directory already exists
+        if (!prebuiltDistDir) {
+          const candidateDirs = [
+            path.join(projectRoot, 'dist'),
+            path.join(projectRoot, 'build'),
+            path.join(tempBuildDir, 'dist'),
+            path.join(tempBuildDir, 'frontend', 'dist'),
+            path.join(tempBuildDir, 'client', 'dist'),
+            path.join(tempBuildDir, 'web', 'dist'),
+          ];
+          for (const cdir of candidateDirs) {
+            if (fs.existsSync(path.join(cdir, 'index.html'))) {
+              prebuiltDistDir = cdir;
+              logs += `✓ Detected pre-compiled production assets in ${path.basename(cdir)}/ directory.\n`;
+              break;
+            }
+          }
+        }
+
+        let distDir = prebuiltDistDir;
+
+        // If no pre-compiled production build exists, run build in isolated sandbox
+        if (!distDir) {
+          logs += `Installing build dependencies in isolated sandbox...\n`;
+          await prisma.product.update({
+            where: { id: productId },
+            data: { previewBuildLogs: logs, previewUpdatedAt: new Date() },
+          });
+
+          // 1. Install dependencies (including devDependencies like vite, tailwind)
+          await runIsolatedCommand(
+            'npm',
+            ['install', '--include=dev', '--prefer-offline', '--no-audit'],
+            projectRoot,
+            300000
+          );
+          logs += `✓ Dependencies installed.\nRunning production build (npm run build)...\n`;
+
+          await prisma.product.update({
+            where: { id: productId },
+            data: { previewBuildLogs: logs, previewUpdatedAt: new Date() },
+          });
+
+          // 2. Build production assets: try npm run build, with fallback to npx vite build (bypassing tsc type check errors)
+          try {
+            await runIsolatedCommand('npm', ['run', 'build'], projectRoot, 300000);
+            logs += `✓ Production build completed.\n`;
+          } catch (firstBuildErr) {
+            logs += `ℹ npm run build encountered type check error. Attempting direct Vite production build (skipping tsc)...\n`;
+            try {
+              await runIsolatedCommand('npx', ['vite', 'build'], projectRoot, 300000);
+              logs += `✓ Direct Vite build completed successfully.\n`;
+            } catch (secondBuildErr) {
+              throw firstBuildErr;
+            }
+          }
+
+          // 3. Locate dist or build directory
+          distDir = path.join(projectRoot, 'dist');
+          if (!fs.existsSync(distDir) || !fs.existsSync(path.join(distDir, 'index.html'))) {
+            distDir = path.join(projectRoot, 'build');
+          }
+        }
+
+        if (!distDir || !fs.existsSync(path.join(distDir, 'index.html'))) {
           throw new Error('Build finished, but no dist/index.html or build/index.html was produced.');
         }
 
@@ -984,8 +1058,8 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
           let html = fs.readFileSync(distIndexPath, 'utf8');
 
           // Rewrite absolute root asset URLs to relative for /previews/:id/ hosting
-          html = html.replace(/(href|src)="\/(assets|favicon|logo|static)/g, '$1="./$2');
-          html = html.replace(/(href|src)='\/ (assets|favicon|logo|static)/g, "$1='./$2");
+          html = html.replace(/(href|src)="\/(assets|favicon|logo|full-logo|icons|static)/g, '$1="./$2');
+          html = html.replace(/(href|src)='\/ (assets|favicon|logo|full-logo|icons|static)/g, "$1='./$2");
 
           if (!html.includes('coderharbor-preview-sandbox')) {
             const interceptor = getSandboxInterceptorScript();
