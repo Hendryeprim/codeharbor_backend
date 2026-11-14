@@ -113,9 +113,12 @@ app.use(
       return res.redirect(301, `/previews/${productId}/`);
     }
 
-    // Security & Embedding Headers
+    // Security, Embedding & Cache Headers
     res.removeHeader('X-Frame-Options');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.setHeader(
       'Content-Security-Policy',
       "frame-ancestors 'self' http://localhost:* http://127.0.0.1:* https://coderharbor.com http://coderharbor.com *.coderharbor.com;"
