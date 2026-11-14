@@ -471,9 +471,54 @@ const copyDirectory = (src, dest) => {
 };
 
 /**
- * Locate any valid index.html in a directory with priority for common frontend layouts
+ * Checks whether an index.html is ready for direct browser serving (compiled/static)
+ * or if it contains raw development scripts (.jsx, .tsx, /src/main.) that require Vite/React compilation
  */
-export const findFirstIndexHtml = (dir) => {
+export const isStaticReadyHtml = (htmlPath) => {
+  if (!fs.existsSync(htmlPath)) return false;
+  try {
+    const content = fs.readFileSync(htmlPath, 'utf8');
+    const hasRawJsxOrTsx =
+      content.includes('.jsx') ||
+      content.includes('.tsx') ||
+      content.includes('/src/main.') ||
+      content.includes('src="/src/') ||
+      content.includes('src="./src/');
+    return !hasRawJsxOrTsx;
+  } catch (_) {
+    return false;
+  }
+};
+
+/**
+ * Recursively locate directory containing package.json
+ */
+export const findFirstPackageJsonDir = (dir) => {
+  if (!fs.existsSync(dir)) return null;
+  if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
+  const scan = (d, depth = 0) => {
+    if (depth > 3 || !fs.existsSync(d)) return null;
+    try {
+      const ents = fs.readdirSync(d, { withFileTypes: true });
+      for (const ent of ents) {
+        if (ent.name === 'node_modules' || ent.name === '.git' || ent.name.startsWith('.')) continue;
+        const full = path.join(d, ent.name);
+        if (ent.isFile() && ent.name === 'package.json') return d;
+        if (ent.isDirectory()) {
+          const found = scan(full, depth + 1);
+          if (found) return found;
+        }
+      }
+    } catch (_) {}
+    return null;
+  };
+  return scan(dir);
+};
+
+/**
+ * Locate any valid compiled/static index.html in a directory with priority for common frontend layouts
+ */
+export const findFirstIndexHtml = (dir, requireStaticReady = true) => {
   if (!fs.existsSync(dir)) return null;
   const priorityCandidates = [
     path.join(dir, 'dist', 'index.html'),
@@ -487,12 +532,17 @@ export const findFirstIndexHtml = (dir) => {
     path.join(dir, 'client', 'build', 'index.html'),
     path.join(dir, 'client', 'public', 'index.html'),
     path.join(dir, 'client', 'index.html'),
+    path.join(dir, 'web', 'dist', 'index.html'),
     path.join(dir, 'web', 'index.html'),
     path.join(dir, 'public', 'index.html'),
     path.join(dir, 'index.html'),
   ];
   for (const cand of priorityCandidates) {
-    if (fs.existsSync(cand)) return cand;
+    if (fs.existsSync(cand)) {
+      if (!requireStaticReady || isStaticReadyHtml(cand)) {
+        return cand;
+      }
+    }
   }
   const scan = (d, depth = 0) => {
     if (depth > 4 || !fs.existsSync(d)) return null;
@@ -501,7 +551,11 @@ export const findFirstIndexHtml = (dir) => {
       for (const ent of entries) {
         if (ent.name === 'node_modules' || ent.name === '.git' || ent.name.startsWith('.')) continue;
         const full = path.join(d, ent.name);
-        if (ent.isFile() && ent.name.toLowerCase() === 'index.html') return full;
+        if (ent.isFile() && ent.name.toLowerCase() === 'index.html') {
+          if (!requireStaticReady || isStaticReadyHtml(full)) {
+            return full;
+          }
+        }
         if (ent.isDirectory()) {
           const found = scan(full, depth + 1);
           if (found) return found;
@@ -1075,18 +1129,34 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
         const zip = new AdmZip(zipFilePath);
         zip.extractAllTo(tempBuildDir, true);
 
+        // Auto-flatten single top-level folder wrapper (typical for GitHub zipball downloads: repo-branch-sha/)
+        const rootEnts = fs.readdirSync(tempBuildDir);
+        if (rootEnts.length === 1) {
+          const singleCandidate = path.join(tempBuildDir, rootEnts[0]);
+          if (fs.existsSync(singleCandidate) && fs.statSync(singleCandidate).isDirectory()) {
+            const innerFiles = fs.readdirSync(singleCandidate);
+            for (const item of innerFiles) {
+              fs.renameSync(path.join(singleCandidate, item), path.join(tempBuildDir, item));
+            }
+            cleanDirectory(singleCandidate);
+          }
+        }
+
         // Determine correct project root directory containing package.json
         let projectRoot = tempBuildDir;
-        if (inspection.buildDir) {
-          const candidate = path.join(tempBuildDir, inspection.buildDir);
-          if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, 'package.json'))) {
-            projectRoot = candidate;
-          }
-        } else if (inspection.rootDir) {
-          const candidate = path.join(tempBuildDir, inspection.rootDir);
-          if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, 'package.json'))) {
-            projectRoot = candidate;
-          }
+        if (fs.existsSync(path.join(tempBuildDir, 'package.json'))) {
+          projectRoot = tempBuildDir;
+        } else if (fs.existsSync(path.join(tempBuildDir, 'frontend', 'package.json'))) {
+          projectRoot = path.join(tempBuildDir, 'frontend');
+        } else if (fs.existsSync(path.join(tempBuildDir, 'client', 'package.json'))) {
+          projectRoot = path.join(tempBuildDir, 'client');
+        } else if (fs.existsSync(path.join(tempBuildDir, 'web', 'package.json'))) {
+          projectRoot = path.join(tempBuildDir, 'web');
+        } else if (inspection.buildDir && fs.existsSync(path.join(tempBuildDir, inspection.buildDir, 'package.json'))) {
+          projectRoot = path.join(tempBuildDir, inspection.buildDir);
+        } else {
+          const foundPkgDir = findFirstPackageJsonDir(tempBuildDir);
+          if (foundPkgDir) projectRoot = foundPkgDir;
         }
 
         // 0. High-Priority Pre-Built Bundle Detection:
