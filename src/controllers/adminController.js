@@ -690,12 +690,18 @@ export const importProjectGithubLink = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Product not found.' });
     }
 
-    const result = await processGithubRepo(productId, githubUrl, {
-      backendGithubUrl,
-      token: githubToken,
+    // ── ASYNC BUILD: respond immediately so admin doesn't wait 2-5 minutes ──────
+    // 1. Set status to BUILDING right now
+    await prisma.product.update({
+      where: { id: productId },
+      data: {
+        previewStatus: 'BUILDING',
+        previewBuildLogs: `GitHub link received: ${githubUrl}\nDownloading repository and starting build in background...\nThis usually takes 1-3 minutes. The page will auto-refresh when done.`,
+        previewUpdatedAt: new Date(),
+      },
     });
 
-    // Remove previous local ZIP files from disk + DB to save server storage
+    // 2. Remove old ZIP files from DB (keep metadata clean)
     for (const oldFile of product.files || []) {
       if (oldFile.privateStorageKey && !oldFile.privateStorageKey.startsWith('github')) {
         try {
@@ -706,30 +712,52 @@ export const importProjectGithubLink = async (req, res, next) => {
     }
     await prisma.productFile.deleteMany({ where: { productId } });
 
-    const ghFile = await prisma.productFile.create({
-      data: {
-        productId,
-        filename: result.github.displayFilename || `${result.github.owner}/${result.github.repo}@${result.github.branch}`,
-        originalName: result.github.originalName || `${result.github.repo}-${result.github.branch}.zip`,
-        privateStorageKey: result.github.storageKey,
-        fileSize: BigInt(result.github.archiveBytes),
-        fileType: 'application/vnd.github+zip',
-        version: result.github.branch.slice(0, 20),
-      },
-    });
-
-    clearCachePattern('product');
-
+    // 3. Respond immediately (admin sees BUILDING status, page polls for READY)
     res.status(201).json({
       success: true,
-      message: 'GitHub repository linked! Template preview ready with zero ZIP storage.',
-      file: {
-        ...ghFile,
-        fileSize: Number(ghFile.fileSize),
-      },
-      preview: result.preview,
-      github: result.github,
+      message: 'GitHub repository linked! Preview is building in the background. This page will update automatically when the preview is ready (usually 1-3 minutes).',
+      preview: { status: 'BUILDING' },
+      github: { url: githubUrl },
     });
+
+    // 4. Run build in background (do NOT await)
+    processGithubRepo(productId, githubUrl, {
+      backendGithubUrl,
+      token: githubToken,
+    }).then(async (result) => {
+      try {
+        // Save GitHub file record after build completes
+        await prisma.productFile.create({
+          data: {
+            productId,
+            filename: result.github.displayFilename || `${result.github.owner}/${result.github.repo}@${result.github.branch}`,
+            originalName: result.github.originalName || `${result.github.repo}-${result.github.branch}.zip`,
+            privateStorageKey: result.github.storageKey,
+            fileSize: BigInt(result.github.archiveBytes),
+            fileType: 'application/vnd.github+zip',
+            version: result.github.branch.slice(0, 20),
+          },
+        });
+        clearCachePattern('product');
+        console.log(`[GitHub Import] ✓ Build complete for product ${productId}`);
+      } catch (dbErr) {
+        console.error(`[GitHub Import] DB save error for ${productId}:`, dbErr.message);
+      }
+    }).catch(async (buildErr) => {
+      console.error(`[GitHub Import] Build failed for ${productId}:`, buildErr.message);
+      try {
+        await prisma.product.update({
+          where: { id: productId },
+          data: {
+            previewStatus: 'FAILED',
+            previewBuildLogs: `Build failed: ${buildErr.message.slice(0, 500)}`,
+            previewUpdatedAt: new Date(),
+          },
+        });
+        clearCachePattern('product');
+      } catch (_) {}
+    });
+
   } catch (error) {
     if (error.message?.includes('GitHub') || error.message?.includes('URL')) {
       return res.status(400).json({ success: false, message: error.message });

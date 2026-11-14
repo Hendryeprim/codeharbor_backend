@@ -671,6 +671,11 @@ const runIsolatedCommand = (cmd, args, cwd, timeoutMs = 300000) => {
       DISABLE_ESLINT_PLUGIN: 'true',
       ESLINT_NO_DEV_ERRORS: 'true',
       TSC_COMPILE_ON_ERROR: 'true',
+      // ── SHARED NPM CACHE ──────────────────────────────────────────────────────
+      // Reuse downloaded packages across all project builds so npm install goes
+      // from ~90 seconds (cold) down to ~10-20 seconds (warm cache hit).
+      npm_config_cache: '/tmp/coderharbor_npm_cache',
+      npm_config_prefer_offline: 'true',
     };
 
     const isWin = process.platform === 'win32';

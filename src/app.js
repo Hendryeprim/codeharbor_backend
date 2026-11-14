@@ -84,9 +84,25 @@ app.use((req, res, next) => {
     const productId = match[1];
     // Avoid intercepting actual API requests
     if (!req.path.startsWith('/api') && !req.path.startsWith('/previews') && !req.path.startsWith('/uploads')) {
-      const candidatePath = path.join(PREVIEWS_DIR, productId, req.path);
+      const previewRoot = path.join(PREVIEWS_DIR, productId);
+      // Try exact path first (e.g. /logo.png → previews/id/logo.png)
+      const candidatePath = path.join(previewRoot, req.path);
       if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).isFile()) {
         return res.sendFile(candidatePath);
+      }
+      // Also check inside assets/ and images/ subdirectories for deeper asset references
+      const basename = path.basename(req.path);
+      const subdirCandidates = [
+        path.join(previewRoot, 'assets', basename),
+        path.join(previewRoot, 'images', basename),
+        path.join(previewRoot, 'icons', basename),
+        path.join(previewRoot, 'public', basename),
+        path.join(previewRoot, 'static', basename),
+      ];
+      for (const sub of subdirCandidates) {
+        if (fs.existsSync(sub) && fs.statSync(sub).isFile()) {
+          return res.sendFile(sub);
+        }
       }
     }
   }
