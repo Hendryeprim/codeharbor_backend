@@ -1348,7 +1348,7 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
 
           // Rewrite absolute root asset URLs to relative for /previews/:id/ hosting
           html = html.replace(/(href|src)="\/(assets|favicon|logo|full-logo|icons|static)/g, '$1="./$2');
-          html = html.replace(/(href|src)='\/ (assets|favicon|logo|full-logo|icons|static)/g, "$1='./$2");
+          html = html.replace(/(href|src)='\/(assets|favicon|logo|full-logo|icons|static)/g, "$1='./$2");
 
           // Remove any previously injected (possibly outdated) interceptor, then re-inject latest
           html = html.replace(/<script id="coderharbor-preview-sandbox">[\s\S]*?<\/script>\n?/g, '');
