@@ -6,12 +6,15 @@ export const normalizePreviewUrl = (url, productId, req = null) => {
   const host = req?.headers?.host || (req?.get ? req.get('host') : '') || '';
   const isLocalHost = host.startsWith('localhost') || host.startsWith('127.0.0.1');
 
-  // If running in purely local dev environment, keep localhost
-  if (process.env.IS_LOCAL_DEV === 'true' && isLocalHost) {
+  // If accessed locally (localhost:5050 or IS_LOCAL_DEV), preserve local endpoint
+  if (isLocalHost || process.env.IS_LOCAL_DEV === 'true') {
+    if (url.startsWith('/previews/')) {
+      return `http://localhost:5050${url}`;
+    }
     return url;
   }
 
-  // In production (aaPanel, coderharbor.com) or whenever accessed through a non-local client:
+  // In production (aaPanel, coderharbor.com) or whenever accessed through live domain:
   // Convert any localhost / 127.0.0.1 or port 5050 url to the canonical public preview endpoint
   if (url.includes('localhost') || url.includes('127.0.0.1') || url.includes(':5050')) {
     return `https://api.coderharbor.com/previews/${productId}/`;
