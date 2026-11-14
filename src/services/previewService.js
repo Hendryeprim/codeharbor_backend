@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { Readable, pipeline as _pipeline } from 'stream';
@@ -674,7 +675,7 @@ const runIsolatedCommand = (cmd, args, cwd, timeoutMs = 300000) => {
       // ── SHARED NPM CACHE ──────────────────────────────────────────────────────
       // Reuse downloaded packages across all project builds so npm install goes
       // from ~90 seconds (cold) down to ~10-20 seconds (warm cache hit).
-      npm_config_cache: '/tmp/coderharbor_npm_cache',
+      npm_config_cache: path.join(os.tmpdir(), 'coderharbor_npm_cache'),
       npm_config_prefer_offline: 'true',
     };
 
