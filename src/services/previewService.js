@@ -1270,6 +1270,25 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
             try { fs.rmSync(lockPath, { force: true }); } catch (_) {}
           }
 
+          // If project specifies experimental Vite 8+ (which uses Rolldown native rust bindings that crash on Linux), swap for stable Vite 6
+          const pkgJsonPath = path.join(projectRoot, 'package.json');
+          if (fs.existsSync(pkgJsonPath)) {
+            try {
+              const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+              let pkgModified = false;
+              for (const depKey of ['dependencies', 'devDependencies']) {
+                if (pkgJson[depKey]?.vite && /[\^~>=]*8\./.test(pkgJson[depKey].vite)) {
+                  pkgJson[depKey].vite = '^6.2.0';
+                  pkgModified = true;
+                }
+              }
+              if (pkgModified) {
+                fs.writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2), 'utf8');
+                logs += `ℹ Configured stable Vite 6 engine for guaranteed Linux compatibility.\n`;
+              }
+            } catch (_) {}
+          }
+
           // 1. Install dependencies with resilient fallbacks
           try {
             await runIsolatedCommand(
@@ -1348,6 +1367,17 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
               } catch (errD) {
                 buildErrors.push(`react-scripts.js: ${errD.message.slice(-300)}`);
               }
+            }
+          }
+
+          // Strategy E: Standalone Vite 6 pinned build (bypasses any broken local bundler / native binding issues)
+          if (!buildSuccess && (inspection.hasFrontendVite || fs.existsSync(path.join(projectRoot, 'vite.config.js')) || fs.existsSync(path.join(projectRoot, 'vite.config.ts')))) {
+            try {
+              await runIsolatedCommand('npx', ['--yes', 'vite@^6.2.0', 'build'], projectRoot, 300000);
+              logs += `✓ Production build completed (pinned vite 6 fallback).\n`;
+              buildSuccess = true;
+            } catch (errE) {
+              buildErrors.push(`pinned vite 6: ${errE.message.slice(-300)}`);
             }
           }
 
