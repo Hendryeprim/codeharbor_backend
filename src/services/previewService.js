@@ -32,12 +32,12 @@ export const getPreviewUrl = (productId) => {
   if (process.env.BACKEND_PUBLIC_URL) {
     return `${process.env.BACKEND_PUBLIC_URL.replace(/\/$/, '')}/previews/${productId}/`;
   }
-  // Unless explicitly designated as local development machine, default to the live coderharbor preview endpoint
-  if (process.env.IS_LOCAL_DEV !== 'true') {
-    return `https://api.coderharbor.com/previews/${productId}/`;
+  // Only use localhost if explicitly in local dev and NOT in production
+  if (process.env.IS_LOCAL_DEV === 'true' && process.env.NODE_ENV !== 'production') {
+    const port = process.env.PORT || 5050;
+    return `http://localhost:${port}/previews/${productId}/`;
   }
-  const port = process.env.PORT || 5050;
-  return `http://localhost:${port}/previews/${productId}/`;
+  return `https://api.coderharbor.com/previews/${productId}/`;
 };
 
 const normalize = (p) => (p || '').replace(/\\/g, '/');
@@ -660,32 +660,31 @@ export const patchProjectForSubpathRouting = (targetDir, productId) => {
  */
 const runIsolatedCommand = (cmd, args, cwd, timeoutMs = 300000) => {
   return new Promise((resolve, reject) => {
-    // Sanitized environment: strip sensitive backend secrets
+    const isWin = process.platform === 'win32';
+    const nodeBinDir = path.dirname(process.execPath);
+    const localBinDir = path.join(cwd, 'node_modules', '.bin');
+    const existingPath = process.env.PATH || '';
+    // Guarantee that the running Node binary and local project binaries (vite, etc.) are at the front of PATH
+    const mergedPath = [localBinDir, nodeBinDir, existingPath].filter(Boolean).join(path.delimiter);
+
     const cleanEnv = {
-      PATH: process.env.PATH,
-      HOME: process.env.HOME || process.env.USERPROFILE,
-      USERPROFILE: process.env.USERPROFILE,
-      APPDATA: process.env.APPDATA,
-      LOCALAPPDATA: process.env.LOCALAPPDATA,
+      ...process.env,
+      PATH: mergedPath,
       NODE_ENV: 'development', // Must be development so devDependencies (vite, tailwind, etc.) are installed!
       CI: 'false', // Prevent CRA and build tools from failing on ESLint or compiler warnings
       DISABLE_ESLINT_PLUGIN: 'true',
       ESLINT_NO_DEV_ERRORS: 'true',
       TSC_COMPILE_ON_ERROR: 'true',
-      // ── SHARED NPM CACHE ──────────────────────────────────────────────────────
-      // Reuse downloaded packages across all project builds so npm install goes
-      // from ~90 seconds (cold) down to ~10-20 seconds (warm cache hit).
       npm_config_cache: path.join(os.tmpdir(), 'coderharbor_npm_cache'),
-      npm_config_prefer_offline: 'true',
     };
 
-    const isWin = process.platform === 'win32';
+    // Always use shell: true so PATH lookups and subshell executions (e.g. sh -c "vite build") succeed on both Windows and Linux
     const executable = isWin && (cmd === 'npm' || cmd === 'npx') ? `${cmd}.cmd` : cmd;
 
     const child = spawn(executable, args, {
       cwd,
       env: cleanEnv,
-      shell: isWin,
+      shell: true,
       timeout: timeoutMs,
     });
 
@@ -1297,7 +1296,7 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
             await runIsolatedCommand('npm', ['run', 'build'], projectRoot, 300000);
             logs += `✓ Production build completed.\n`;
           } catch (firstBuildErr) {
-            logs += `ℹ Standard build failed. Attempting direct build tool execution...\n`;
+            logs += `ℹ Standard build failed (${firstBuildErr.message.slice(-300)}). Attempting direct build tool execution...\n`;
             try {
               if (inspection.hasFrontendVite || fs.existsSync(path.join(projectRoot, 'vite.config.js')) || fs.existsSync(path.join(projectRoot, 'vite.config.ts'))) {
                 await runIsolatedCommand('npx', ['vite', 'build'], projectRoot, 300000);
@@ -1308,7 +1307,7 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
               }
               logs += `✓ Direct build completed successfully.\n`;
             } catch (secondBuildErr) {
-              logs += `ℹ Direct build tool skipped. Scanning for production assets...\n`;
+              logs += `ℹ Direct build tool skipped (${secondBuildErr.message.slice(-300)}). Scanning for production assets...\n`;
             }
           }
 
