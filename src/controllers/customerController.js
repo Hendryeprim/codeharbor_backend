@@ -343,14 +343,17 @@ export const downloadFreeProduct = async (req, res, next) => {
         },
       });
 
+      const arrayBuf = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuf);
+
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Length', buffer.length);
       res.setHeader(
         'Content-Disposition',
         `attachment; filename="${encodeURIComponent(file.originalName || `${githubMeta.repo}.zip`)}"`
       );
-      res.setHeader('Content-Type', 'application/zip');
 
-      await pipeline(toNodeStream(response.body), res);
-      return;
+      return res.end(buffer);
     }
 
     // Path traversal prevention: resolve path inside PRIVATE_STORAGE_DIR

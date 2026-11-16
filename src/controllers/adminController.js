@@ -8,6 +8,7 @@ import {
   processGithubRepo,
   rebuildProjectPreview,
   toggleProjectPreview,
+  parseGithubUrl,
 } from '../services/previewService.js';
 import { PRIVATE_STORAGE_DIR } from '../middleware/upload.js';
 import { normalizePreviewUrl } from './productController.js';
@@ -712,6 +713,35 @@ export const importProjectGithubLink = async (req, res, next) => {
     }
     await prisma.productFile.deleteMany({ where: { productId } });
 
+    // CREATE GITHUB FILE RECORD IMMEDIATELY so free source package download works instantly
+    try {
+      const parsedGh = parseGithubUrl(githubUrl);
+      const isDual = Boolean(backendGithubUrl && backendGithubUrl.trim());
+      const parsedBe = isDual ? parseGithubUrl(backendGithubUrl) : null;
+      const storageKey = isDual
+        ? `github2::${parsedGh.owner}/${parsedGh.repo}@${parsedGh.branch || 'main'}|${parsedBe.owner}/${parsedBe.repo}@${parsedBe.branch || 'main'}`
+        : `github::${parsedGh.owner}/${parsedGh.repo}@${parsedGh.branch || 'main'}`;
+      const displayFilename = isDual
+        ? `${parsedGh.owner}/${parsedGh.repo}@${parsedGh.branch || 'main'} + ${parsedBe.owner}/${parsedBe.repo}@${parsedBe.branch || 'main'}`
+        : `${parsedGh.owner}/${parsedGh.repo}@${parsedGh.branch || 'main'}`;
+      const originalName = isDual ? `${parsedGh.repo}-fullstack.zip` : `${parsedGh.repo}-${parsedGh.branch || 'main'}.zip`;
+
+      await prisma.productFile.create({
+        data: {
+          productId,
+          filename: displayFilename,
+          originalName,
+          privateStorageKey: storageKey,
+          fileSize: 1048576n,
+          fileType: 'application/vnd.github+zip',
+          version: (parsedGh.branch || 'main').slice(0, 20),
+        },
+      });
+      clearCachePattern('product');
+    } catch (createErr) {
+      console.warn('Initial product file creation warning:', createErr.message);
+    }
+
     // 3. Respond immediately (admin sees BUILDING status, page polls for READY)
     res.status(201).json({
       success: true,
@@ -726,16 +756,13 @@ export const importProjectGithubLink = async (req, res, next) => {
       token: githubToken,
     }).then(async (result) => {
       try {
-        // Save GitHub file record after build completes
-        await prisma.productFile.create({
+        // Refine GitHub file record after build completes
+        await prisma.productFile.updateMany({
+          where: { productId },
           data: {
-            productId,
-            filename: result.github.displayFilename || `${result.github.owner}/${result.github.repo}@${result.github.branch}`,
-            originalName: result.github.originalName || `${result.github.repo}-${result.github.branch}.zip`,
-            privateStorageKey: result.github.storageKey,
-            fileSize: BigInt(result.github.archiveBytes),
-            fileType: 'application/vnd.github+zip',
-            version: result.github.branch.slice(0, 20),
+            fileSize: BigInt(result.github.archiveBytes || 1048576),
+            filename: result.github.displayFilename || undefined,
+            originalName: result.github.originalName || undefined,
           },
         });
         clearCachePattern('product');

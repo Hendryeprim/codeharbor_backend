@@ -959,13 +959,13 @@ export const deployInteractiveShowcasePreview = async (
     <div style="display:flex; align-items:center; gap:12px;">
       <span style="font-size:20px;">⚡</span>
       <div>
-        <h1 style="font-size:15px; font-weight:700; color:#F8FAFC;">CoderHarbor Live Preview</h1>
-        <p style="font-size:11px; color:#94A3B8;">Verified Project Sandbox</p>
+        <h1 style="font-size:15px; font-weight:800; color:#F8FAFC;">${escapeHtml(title)}</h1>
+        <p style="font-size:11px; color:#C084FC;">Interactive Application Sandbox</p>
       </div>
     </div>
     <div class="badge">
       <span class="badge-dot"></span>
-      <span>Preview Sandbox Active</span>
+      <span>Live Sandbox Active</span>
     </div>
   </header>
 
@@ -1270,30 +1270,11 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
             try { fs.rmSync(lockPath, { force: true }); } catch (_) {}
           }
 
-          // If project specifies experimental Vite 8+ (which uses Rolldown native rust bindings that crash on Linux), swap for stable Vite 6
-          const pkgJsonPath = path.join(projectRoot, 'package.json');
-          if (fs.existsSync(pkgJsonPath)) {
-            try {
-              const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-              let pkgModified = false;
-              for (const depKey of ['dependencies', 'devDependencies']) {
-                if (pkgJson[depKey]?.vite && /[\^~>=]*8\./.test(pkgJson[depKey].vite)) {
-                  pkgJson[depKey].vite = '^6.2.0';
-                  pkgModified = true;
-                }
-              }
-              if (pkgModified) {
-                fs.writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2), 'utf8');
-                logs += `ℹ Configured stable Vite 6 engine for guaranteed Linux compatibility.\n`;
-              }
-            } catch (_) {}
-          }
-
-          // 1. Install dependencies with resilient fallbacks
+          // 1. Install dependencies with resilient fallbacks (include optional dependencies for native OS bindings)
           try {
             await runIsolatedCommand(
               'npm',
-              ['install', '--include=dev', '--legacy-peer-deps', '--no-audit'],
+              ['install', '--include=dev', '--include=optional', '--legacy-peer-deps', '--no-audit'],
               projectRoot,
               300000
             );
@@ -1303,13 +1284,24 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
             try {
               await runIsolatedCommand(
                 'npm',
-                ['install', '--include=dev', '--legacy-peer-deps', '--force', '--no-audit'],
+                ['install', '--include=dev', '--include=optional', '--legacy-peer-deps', '--force', '--no-audit'],
                 projectRoot,
                 300000
               );
               logs += `✓ Dependencies installed (forced).\nRunning production build...\n`;
             } catch (secondInstallErr) {
               logs += `ℹ npm install warning (${secondInstallErr.message.slice(-200)}). Proceeding to build attempt...\n`;
+            }
+          }
+
+          // If running on Linux and Rolldown is in dependencies/node_modules, guarantee @rolldown/binding-linux-x64-gnu
+          if (process.platform === 'linux') {
+            const hasRolldown = fs.existsSync(path.join(projectRoot, 'node_modules', 'rolldown'));
+            if (hasRolldown) {
+              try {
+                await runIsolatedCommand('npm', ['install', '--save-optional', '@rolldown/binding-linux-x64-gnu', '--legacy-peer-deps', '--no-audit'], projectRoot, 120000);
+                logs += `✓ Verified Linux native Rolldown binding.\n`;
+              } catch (_) {}
             }
           }
 
