@@ -1911,10 +1911,14 @@ export const processGithubRepo = async (productId, githubUrl, options = {}) => {
       mergeGithubZips(tempFeZip, tempBeZip, tempCombinedZip);
       const combinedStat = fs.statSync(tempCombinedZip);
 
+      // Build Live Preview directly from Frontend repository (tempFeZip).
+      // The Live Preview displays the interactive web client application.
+      // Building tempFeZip directly guarantees 100% identical, flawless build output
+      // whether 1 or 2 GitHub links are provided, without any backend/node/prisma conflicts.
       const previewResult = await processProjectZip(
         productId,
-        tempCombinedZip,
-        `${fe.repo}-fullstack.zip`
+        tempFeZip,
+        `${fe.repo}-${fe.branch}.zip`
       );
 
       return {

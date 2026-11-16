@@ -310,11 +310,13 @@ export const downloadFreeProduct = async (req, res, next) => {
             },
           });
 
+          const stat = fs.statSync(tempFull);
+          res.setHeader('Content-Type', 'application/zip');
+          res.setHeader('Content-Length', stat.size);
           res.setHeader(
             'Content-Disposition',
             `attachment; filename="${encodeURIComponent(file.originalName || `${githubMeta.frontend.repo}-fullstack.zip`)}"`
           );
-          res.setHeader('Content-Type', 'application/zip');
 
           await pipeline(fs.createReadStream(tempFull), res);
         } finally {
