@@ -725,7 +725,8 @@ export const deployInteractiveShowcasePreview = async (
   zipFilePath,
   inspection = null,
   targetPreviewDir,
-  reason = ''
+  reason = '',
+  preservedLogs = ''
 ) => {
   cleanDirectory(targetPreviewDir);
   fs.mkdirSync(targetPreviewDir, { recursive: true });
@@ -1068,11 +1069,12 @@ ${escapeHtml(readmeContent || fullDesc || 'Project codebase is verified and read
   } catch (_) {}
 
   const previewUrl = getPreviewUrl(productId);
-  const logs =
-    `✓ Project archive validated and indexed successfully.\n` +
-    `✓ Interactive Codebase Architecture & Documentation Showcase generated.\n` +
-    (reason ? `ℹ Note: ${reason}\n` : '') +
-    `Live URL: ${previewUrl}`;
+  const logs = preservedLogs
+    ? `${preservedLogs}\nℹ Notice: ${reason}\nLive URL: ${previewUrl}`
+    : `✓ Project archive validated and indexed successfully.\n` +
+      `✓ Interactive Codebase Architecture & Documentation Showcase generated.\n` +
+      (reason ? `ℹ Note: ${reason}\n` : '') +
+      `Live URL: ${previewUrl}`;
 
   await prisma.product.update({
     where: { id: productId },
@@ -1262,6 +1264,12 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
             data: { previewBuildLogs: logs, previewUpdatedAt: new Date() },
           });
 
+          // Remove foreign package-lock.json to avoid cross-platform native binding mismatches (e.g. win32 vs linux-x64)
+          const lockPath = path.join(projectRoot, 'package-lock.json');
+          if (fs.existsSync(lockPath)) {
+            try { fs.rmSync(lockPath, { force: true }); } catch (_) {}
+          }
+
           // 1. Install dependencies with resilient fallbacks
           try {
             await runIsolatedCommand(
@@ -1270,7 +1278,7 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
               projectRoot,
               300000
             );
-            logs += `✓ Dependencies installed.\nRunning production build (npm run build)...\n`;
+            logs += `✓ Dependencies installed.\nRunning production build...\n`;
           } catch (firstInstallErr) {
             logs += `ℹ Retrying npm install with --force...\n`;
             try {
@@ -1280,9 +1288,9 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
                 projectRoot,
                 300000
               );
-              logs += `✓ Dependencies installed (forced).\nRunning production build (npm run build)...\n`;
+              logs += `✓ Dependencies installed (forced).\nRunning production build...\n`;
             } catch (secondInstallErr) {
-              logs += `ℹ npm install warning: Proceeding to build attempt...\n`;
+              logs += `ℹ npm install warning (${secondInstallErr.message.slice(-200)}). Proceeding to build attempt...\n`;
             }
           }
 
@@ -1291,24 +1299,60 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
             data: { previewBuildLogs: logs, previewUpdatedAt: new Date() },
           });
 
-          // 2. Build production assets: try npm run build, with fallback to direct build tool
+          // 2. Build production assets with multi-strategy fallbacks:
+          let buildSuccess = false;
+          let buildErrors = [];
+
+          // Strategy A: Standard npm run build
           try {
             await runIsolatedCommand('npm', ['run', 'build'], projectRoot, 300000);
-            logs += `✓ Production build completed.\n`;
-          } catch (firstBuildErr) {
-            logs += `ℹ Standard build failed (${firstBuildErr.message.slice(-300)}). Attempting direct build tool execution...\n`;
-            try {
-              if (inspection.hasFrontendVite || fs.existsSync(path.join(projectRoot, 'vite.config.js')) || fs.existsSync(path.join(projectRoot, 'vite.config.ts'))) {
-                await runIsolatedCommand('npx', ['vite', 'build'], projectRoot, 300000);
-              } else if (inspection.packageJsonData?.dependencies?.['react-scripts'] || inspection.packageJsonData?.devDependencies?.['react-scripts']) {
-                await runIsolatedCommand('npx', ['react-scripts', 'build'], projectRoot, 300000);
-              } else {
-                await runIsolatedCommand('npx', ['vite', 'build'], projectRoot, 300000);
+            logs += `✓ Production build completed (npm run build).\n`;
+            buildSuccess = true;
+          } catch (errA) {
+            buildErrors.push(`npm run build: ${errA.message.slice(-300)}`);
+          }
+
+          // Strategy B: Direct node execution of local vite.js (bypasses npm/npx/shell PATH issues completely)
+          if (!buildSuccess) {
+            const localViteBin = path.join(projectRoot, 'node_modules', 'vite', 'bin', 'vite.js');
+            if (fs.existsSync(localViteBin)) {
+              try {
+                await runIsolatedCommand(process.execPath, [localViteBin, 'build'], projectRoot, 300000);
+                logs += `✓ Production build completed (direct local vite).\n`;
+                buildSuccess = true;
+              } catch (errB) {
+                buildErrors.push(`local vite.js: ${errB.message.slice(-300)}`);
               }
-              logs += `✓ Direct build completed successfully.\n`;
-            } catch (secondBuildErr) {
-              logs += `ℹ Direct build tool skipped (${secondBuildErr.message.slice(-300)}). Scanning for production assets...\n`;
             }
+          }
+
+          // Strategy C: npx vite build
+          if (!buildSuccess && (inspection.hasFrontendVite || fs.existsSync(path.join(projectRoot, 'vite.config.js')) || fs.existsSync(path.join(projectRoot, 'vite.config.ts')))) {
+            try {
+              await runIsolatedCommand('npx', ['vite', 'build'], projectRoot, 300000);
+              logs += `✓ Production build completed (npx vite build).\n`;
+              buildSuccess = true;
+            } catch (errC) {
+              buildErrors.push(`npx vite build: ${errC.message.slice(-300)}`);
+            }
+          }
+
+          // Strategy D: Direct react-scripts execution (for CRA)
+          if (!buildSuccess && (inspection.packageJsonData?.dependencies?.['react-scripts'] || inspection.packageJsonData?.devDependencies?.['react-scripts'])) {
+            const localCraBin = path.join(projectRoot, 'node_modules', 'react-scripts', 'bin', 'react-scripts.js');
+            if (fs.existsSync(localCraBin)) {
+              try {
+                await runIsolatedCommand(process.execPath, [localCraBin, 'build'], projectRoot, 300000);
+                logs += `✓ Production build completed (direct react-scripts).\n`;
+                buildSuccess = true;
+              } catch (errD) {
+                buildErrors.push(`react-scripts.js: ${errD.message.slice(-300)}`);
+              }
+            }
+          }
+
+          if (!buildSuccess && buildErrors.length > 0) {
+            logs += `ℹ Build attempts diagnostic:\n${buildErrors.join('\n')}\n`;
           }
 
           // 3. Locate dist, build, or out directory
@@ -1417,7 +1461,8 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
           zipFilePath,
           inspection,
           targetPreviewDir,
-          `Automated Vite build skipped (${buildErr.message.slice(0, 150)}). Codebase architecture showcase generated.`
+          `Automated Vite build skipped (${buildErr.message.slice(0, 150)}). Codebase architecture showcase generated.`,
+          logs
         );
       }
     }
