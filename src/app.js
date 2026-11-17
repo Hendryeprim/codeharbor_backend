@@ -164,6 +164,10 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     service: 'CoderHarbor REST API',
     purchasingStatus: 'Coming Soon',
+    version: '2.1.0-build-fix',
+    cwd: process.cwd(),
+    node: process.version,
+    platform: process.platform,
   });
 });
 

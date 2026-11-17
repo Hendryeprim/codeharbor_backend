@@ -1294,9 +1294,12 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
             }
           }
 
-          // If running on Linux and Rolldown is in dependencies/node_modules, guarantee @rolldown/binding-linux-x64-gnu
+          // If running on Linux, guarantee @rolldown/binding-linux-x64-gnu for Vite 8 / Rolldown
           if (process.platform === 'linux') {
-            const hasRolldown = fs.existsSync(path.join(projectRoot, 'node_modules', 'rolldown'));
+            const hasVite = fs.existsSync(path.join(projectRoot, 'node_modules', 'vite')) ||
+                            Boolean(inspection.packageJsonData?.dependencies?.vite) ||
+                            Boolean(inspection.packageJsonData?.devDependencies?.vite);
+            const hasRolldown = fs.existsSync(path.join(projectRoot, 'node_modules', 'rolldown')) || hasVite;
             if (hasRolldown) {
               try {
                 await runIsolatedCommand('npm', ['install', '--save-optional', '@rolldown/binding-linux-x64-gnu', '--legacy-peer-deps', '--no-audit'], projectRoot, 120000);
@@ -1320,7 +1323,7 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
             logs += `✓ Production build completed (npm run build).\n`;
             buildSuccess = true;
           } catch (errA) {
-            buildErrors.push(`npm run build: ${errA.message.slice(-300)}`);
+            buildErrors.push(`npm run build: ${errA.message.slice(0, 400)}`);
           }
 
           // Strategy B: Direct node execution of local vite.js (bypasses npm/npx/shell PATH issues completely)
@@ -1332,7 +1335,7 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
                 logs += `✓ Production build completed (direct local vite).\n`;
                 buildSuccess = true;
               } catch (errB) {
-                buildErrors.push(`local vite.js: ${errB.message.slice(-300)}`);
+                buildErrors.push(`local vite.js: ${errB.message.slice(0, 400)}`);
               }
             }
           }
@@ -1344,7 +1347,7 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
               logs += `✓ Production build completed (npx vite build).\n`;
               buildSuccess = true;
             } catch (errC) {
-              buildErrors.push(`npx vite build: ${errC.message.slice(-300)}`);
+              buildErrors.push(`npx vite build: ${errC.message.slice(0, 400)}`);
             }
           }
 
@@ -1357,7 +1360,7 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
                 logs += `✓ Production build completed (direct react-scripts).\n`;
                 buildSuccess = true;
               } catch (errD) {
-                buildErrors.push(`react-scripts.js: ${errD.message.slice(-300)}`);
+                buildErrors.push(`react-scripts.js: ${errD.message.slice(0, 400)}`);
               }
             }
           }
@@ -1369,7 +1372,7 @@ export const processProjectZip = async (productId, zipFilePath, originalName = '
               logs += `✓ Production build completed (pinned vite 6 fallback).\n`;
               buildSuccess = true;
             } catch (errE) {
-              buildErrors.push(`pinned vite 6: ${errE.message.slice(-300)}`);
+              buildErrors.push(`pinned vite 6: ${errE.message.slice(0, 400)}`);
             }
           }
 
