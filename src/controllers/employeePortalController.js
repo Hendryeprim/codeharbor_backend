@@ -546,6 +546,8 @@ export const uploadProjectSubmission = async (req, res, next) => {
       console.warn('[Submission Preview] Error in execution worker:', prevErr.message);
     });
 
+    const generatedPreviewUrl = version.liveDemoUrl || null;
+
     // Update ProjectSubmission current version & status
     await prisma.projectSubmission.update({
       where: { id: submission.id },

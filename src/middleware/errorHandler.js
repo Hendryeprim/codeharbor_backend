@@ -29,9 +29,12 @@ export const errorHandler = (err, req, res, next) => {
 
   // Prisma validation errors
   if (err.name === 'PrismaClientValidationError') {
+    console.error('[PrismaClientValidationError Details]:', err.message);
     return res.status(400).json({
       success: false,
-      message: 'Invalid project data provided. Please check the required fields and technology selections.',
+      message: process.env.NODE_ENV === 'development' 
+        ? err.message 
+        : 'Invalid request data or database schema mismatch. Please check your input.',
     });
   }
 
