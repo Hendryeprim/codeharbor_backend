@@ -118,7 +118,7 @@ export const findIndexHtml = (dir) => {
 };
 
 /**
- * Inject base tag into head of HTML
+ * Inject base tag into head of HTML and rewrite absolute assets to relative
  */
 export const injectBaseTag = (htmlPath, baseHref) => {
   try {
@@ -132,11 +132,29 @@ export const injectBaseTag = (htmlPath, baseHref) => {
       } else {
         html = `${baseTag}\n${html}`;
       }
-      fs.writeFileSync(htmlPath, html, 'utf8');
     }
+    // Rewrite root-relative asset URLs to relative for reliable subpath hosting without falling back to CodeHarbor
+    html = html.replace(/(href|src)="\/(assets|favicon|logo|icons|static|css|js|images)/g, '$1="./$2');
+    html = html.replace(/(href|src)='\/(assets|favicon|logo|icons|static|css|js|images)/g, "$1='./$2");
+    fs.writeFileSync(htmlPath, html, 'utf8');
   } catch (e) {
     console.warn('[ExecutionWorker] injectBaseTag error:', e.message);
   }
+};
+
+/**
+ * Return canonical backend preview URL (guarantees preview goes to backend, never frontend SPA)
+ */
+export const getCanonicalPreviewUrl = (subpath) => {
+  const cleanSubpath = (subpath || '').startsWith('/') ? subpath : `/${subpath || ''}`;
+  if (process.env.BACKEND_PUBLIC_URL) {
+    return `${process.env.BACKEND_PUBLIC_URL.replace(/\/$/, '')}${cleanSubpath}`;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    return `https://api.coderharbor.com${cleanSubpath}`;
+  }
+  const port = process.env.PORT || 5050;
+  return `http://localhost:${port}${cleanSubpath}`;
 };
 
 /**
@@ -399,7 +417,7 @@ export const runIsolatedProjectExecution = async ({ versionId, executedById = nu
       previewUrl = `/previews/${targetDirName}/`;
       log(`$ starting preview server...`);
       log(`✓ Server started`);
-      log(`✓ Preview Ready: http://localhost:5173${previewUrl}`);
+      log(`✓ Preview Ready: ${getCanonicalPreviewUrl(previewUrl)}`);
       executionStatus = 'COMPLETED';
       buildStatus = 'SUCCESS';
     }
@@ -463,7 +481,7 @@ export const runIsolatedProjectExecution = async ({ versionId, executedById = nu
             previewUrl = `/previews/${targetDirName}/`;
             log(`$ starting preview server...`);
             log(`✓ Server started`);
-            log(`✓ Preview Ready: http://localhost:5173${previewUrl}`);
+            log(`✓ Preview Ready: ${getCanonicalPreviewUrl(previewUrl)}`);
             executionStatus = 'COMPLETED';
           }
         } else {
@@ -505,8 +523,8 @@ export const runIsolatedProjectExecution = async ({ versionId, executedById = nu
         const isUp = await waitForPort(allocatedPort, 30000);
         if (isUp) {
           log(`✓ Server running at http://127.0.0.1:${allocatedPort}`);
-          previewUrl = `/api/proxy/${version.id}/`;
-          log(`✓ Preview Ready: http://localhost:5173${previewUrl}`);
+          previewUrl = `/api/preview/${version.id}/`;
+          log(`✓ Preview Ready: ${getCanonicalPreviewUrl(previewUrl)}`);
           executionStatus = 'COMPLETED';
           buildStatus = 'SUCCESS';
         } else {
@@ -559,8 +577,8 @@ export const runIsolatedProjectExecution = async ({ versionId, executedById = nu
       const isUp = await waitForPort(allocatedPort, 15000);
       if (isUp) {
         log(`✓ Python server running on port ${allocatedPort}`);
-        previewUrl = `/api/proxy/${version.id}/`;
-        log(`✓ Preview Ready: http://localhost:5173${previewUrl}`);
+        previewUrl = `/api/preview/${version.id}/`;
+        log(`✓ Preview Ready: ${getCanonicalPreviewUrl(previewUrl)}`);
         executionStatus = 'COMPLETED';
         buildStatus = 'SUCCESS';
       } else {
@@ -611,10 +629,12 @@ export const runIsolatedProjectExecution = async ({ versionId, executedById = nu
       previewUrl = `/previews/${targetDirName}/`;
     }
 
-    // Update ProjectVersion with liveDemoUrl
+    const canonicalLiveDemoUrl = getCanonicalPreviewUrl(previewUrl);
+
+    // Update ProjectVersion with canonical backend liveDemoUrl
     await prisma.projectVersion.update({
       where: { id: version.id },
-      data: { liveDemoUrl: previewUrl },
+      data: { liveDemoUrl: canonicalLiveDemoUrl },
     });
 
   } catch (err) {

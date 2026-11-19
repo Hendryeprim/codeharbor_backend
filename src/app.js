@@ -78,38 +78,78 @@ const authLimiter = rateLimit({
 // Serve only public images statically - strictly never private archives
 app.use('/uploads/images', express.static(PUBLIC_UPLOADS_DIR));
 
-// ─── PREVIEW ASSET RESOLVER (FOR ABSOLUTE PATHS LIKE /logo.png) ─────────────
-// Many frontend SPAs reference assets with absolute paths like `/logo.png`,
-// `/favicon.ico`, `/images/bg.jpg` instead of relative paths `./logo.png`.
-// When loaded inside an iframe at `/previews/:productId/`, the browser asks for
-// `api.coderharbor.com/logo.png`.
+// ─── PREVIEW ASSET RESOLVER (FOR ABSOLUTE PATHS LIKE /assets/...) ─────────────
+// Many frontend SPAs reference assets with absolute paths like `/assets/app.js`,
+// `/favicon.ico`, `/images/bg.jpg` instead of relative paths `./assets/app.js`.
+// When loaded inside an iframe at `/previews/:id/` or `/api/preview/:id/`,
+// the browser requests `api.coderharbor.com/assets/...`.
 // We inspect the Referer header to automatically route the asset request to the
-// corresponding project's preview folder!
+// corresponding employee/managed project's running server or preview folder!
 app.use((req, res, next) => {
   const referer = req.headers.referer || '';
-  const match = referer.match(/\/previews\/([a-zA-Z0-9_-]+)/);
+  const match = referer.match(/\/(?:previews|api\/preview|api\/proxy)\/([a-zA-Z0-9_-]+)/);
   if (match && match[1]) {
-    const productId = match[1];
-    // Avoid intercepting actual API requests
-    if (!req.path.startsWith('/api') && !req.path.startsWith('/previews') && !req.path.startsWith('/uploads')) {
-      const previewRoot = path.join(PREVIEWS_DIR, productId);
-      // Try exact path first (e.g. /logo.png → previews/id/logo.png)
-      const candidatePath = path.join(previewRoot, req.path);
-      if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).isFile()) {
-        return res.sendFile(candidatePath);
+    const rawId = match[1];
+    // Avoid intercepting core API endpoints or auth
+    if (!req.path.startsWith('/api/') && !req.path.startsWith('/previews/') && !req.path.startsWith('/uploads/')) {
+      const cleanId = rawId.replace(/^managed-/, '');
+
+      // 1. Check if there is an active running server on an allocated port for this project
+      const active = activeExecutionsMap.get(cleanId) || activeExecutionsMap.get(rawId);
+      if (active && active.port) {
+        const proxyHeaders = { ...req.headers };
+        proxyHeaders.host = `127.0.0.1:${active.port}`;
+        const proxyReq = http.request(
+          {
+            hostname: '127.0.0.1',
+            port: active.port,
+            path: req.originalUrl,
+            method: req.method,
+            headers: proxyHeaders,
+          },
+          (proxyRes) => {
+            const resHeaders = { ...proxyRes.headers };
+            delete resHeaders['x-frame-options'];
+            res.writeHead(proxyRes.statusCode, resHeaders);
+            proxyRes.pipe(res, { end: true });
+          }
+        );
+        proxyReq.on('error', () => next());
+        req.pipe(proxyReq, { end: true });
+        return;
       }
-      // Also check inside assets/ and images/ subdirectories for deeper asset references
-      const basename = path.basename(req.path);
-      const subdirCandidates = [
-        path.join(previewRoot, 'assets', basename),
-        path.join(previewRoot, 'images', basename),
-        path.join(previewRoot, 'icons', basename),
-        path.join(previewRoot, 'public', basename),
-        path.join(previewRoot, 'static', basename),
+
+      // 2. Check static preview storage directories for this project
+      const possibleDirs = [
+        path.join(PREVIEWS_DIR, `managed-${cleanId}`),
+        path.join(PREVIEWS_DIR, rawId),
+        path.join(EXECUTIONS_DIR, `managed-${cleanId}`),
+        path.join(EXECUTIONS_DIR, rawId),
       ];
-      for (const sub of subdirCandidates) {
-        if (fs.existsSync(sub) && fs.statSync(sub).isFile()) {
-          return res.sendFile(sub);
+
+      for (const pDir of possibleDirs) {
+        if (!fs.existsSync(pDir)) continue;
+
+        const candidatePath = path.join(pDir, req.path);
+        if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).isFile()) {
+          return res.sendFile(candidatePath);
+        }
+
+        const basename = path.basename(req.path);
+        const subdirCandidates = [
+          path.join(pDir, 'assets', basename),
+          path.join(pDir, 'dist', 'assets', basename),
+          path.join(pDir, 'images', basename),
+          path.join(pDir, 'icons', basename),
+          path.join(pDir, 'public', basename),
+          path.join(pDir, 'static', basename),
+          path.join(pDir, 'css', basename),
+          path.join(pDir, 'js', basename),
+        ];
+        for (const sub of subdirCandidates) {
+          if (fs.existsSync(sub) && fs.statSync(sub).isFile()) {
+            return res.sendFile(sub);
+          }
         }
       }
     }
@@ -117,69 +157,31 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve isolated live preview projects with sandboxed security headers
-app.use(
-  '/previews/:productId',
-  (req, res, next) => {
-    const { productId } = req.params;
-    // Strict alphanumeric/dash/underscore validation to prevent directory traversal
-    if (!productId || !/^[a-zA-Z0-9_-]+$/.test(productId)) {
-      return res.status(400).send('Invalid preview identifier.');
-    }
-
-    const previewPath = path.join(PREVIEWS_DIR, productId);
-    if (!fs.existsSync(previewPath)) {
-      return res.status(404).send('Live preview is not ready or has not been generated for this project.');
-    }
-
-    // Force trailing slash for preview root so relative ./assets resolve correctly
-    if (req.originalUrl === `/previews/${productId}`) {
-      return res.redirect(301, `/previews/${productId}/`);
-    }
-
-    // Security, Embedding & Cache Headers
-    res.removeHeader('X-Frame-Options');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    res.setHeader(
-      'Content-Security-Policy',
-      "frame-ancestors 'self' http://localhost:* http://127.0.0.1:* https://coderharbor.com http://coderharbor.com *.coderharbor.com;"
-    );
-    next();
-  },
-  (req, res, next) => {
-    const previewPath = path.join(PREVIEWS_DIR, req.params.productId);
-    express.static(previewPath)(req, res, () => {
-      // SPA Fallback: If not a direct asset file with extension, serve index.html
-      const hasExt = Boolean(path.extname(req.path));
-      if (!hasExt) {
-        const indexPath = path.join(previewPath, 'index.html');
-        if (fs.existsSync(indexPath)) {
-          return res.sendFile(indexPath);
-        }
-      }
-      next();
-    });
+// ─── DEDICATED PREVIEW & PROXY HANDLER (GUARANTEES EMPLOYEE PROJECT UI) ───────
+const handlePreviewOrProxy = (req, res, next) => {
+  const rawId = req.params.versionId || req.params.productId;
+  if (!rawId || !/^[a-zA-Z0-9_-]+$/.test(rawId)) {
+    return res.status(400).send('Invalid preview identifier.');
   }
-);
 
-// ─── DYNAMIC SECURE REVERSE PROXY FOR LIVE EXECUTED PROJECTS ───────────────
-app.use('/api/proxy/:versionId', (req, res, next) => {
-  const { versionId } = req.params;
-  const active = activeExecutionsMap.get(versionId);
+  const cleanId = rawId.replace(/^managed-/, '');
 
-  // Security & Frame Embedding Headers
+  // Frame embedding, Cache & Security Headers
   res.removeHeader('X-Frame-Options');
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.setHeader(
     'Content-Security-Policy',
-    "frame-ancestors 'self' http://localhost:* http://127.0.0.1:* https://coderharbor.com http://coderharbor.com *.coderharbor.com;"
+    "frame-ancestors *;"
   );
 
+  // 1. Check if there is an active running process on an allocated port (dynamic dev server / Python / Vite)
+  const active = activeExecutionsMap.get(cleanId) || activeExecutionsMap.get(rawId);
   if (active && active.port) {
-    const targetPath = req.originalUrl.replace(new RegExp(`^/api/proxy/${versionId}`), '') || '/';
+    const routePrefixRegex = new RegExp(`^/(?:previews|api/proxy|api/preview)/${rawId}`);
+    const targetPath = req.originalUrl.replace(routePrefixRegex, '') || '/';
     const proxyHeaders = { ...req.headers };
     proxyHeaders.host = `127.0.0.1:${active.port}`;
 
@@ -209,18 +211,47 @@ app.use('/api/proxy/:versionId', (req, res, next) => {
     return;
   }
 
-  // Fallback to static preview directory if available
-  const staticPath = path.join(PREVIEWS_DIR, `managed-${versionId}`);
-  if (fs.existsSync(staticPath)) {
-    return express.static(staticPath)(req, res, () => {
-      const indexPath = path.join(staticPath, 'index.html');
-      if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
-      next();
-    });
+  // 2. Check static preview storage directories for the built / HTML application
+  const candidateDirs = [
+    path.join(PREVIEWS_DIR, `managed-${cleanId}`),
+    path.join(PREVIEWS_DIR, rawId),
+    path.join(EXECUTIONS_DIR, `managed-${cleanId}`),
+    path.join(EXECUTIONS_DIR, rawId),
+  ];
+
+  for (const staticPath of candidateDirs) {
+    if (fs.existsSync(staticPath)) {
+      // Force trailing slash for preview root so relative ./assets and scripts resolve correctly
+      const baseRoute = req.originalUrl.split('?')[0];
+      if (
+        baseRoute === `/previews/${rawId}` ||
+        baseRoute === `/api/preview/${rawId}` ||
+        baseRoute === `/api/proxy/${rawId}`
+      ) {
+        return res.redirect(301, req.originalUrl.replace(baseRoute, baseRoute + '/'));
+      }
+
+      return express.static(staticPath)(req, res, () => {
+        // SPA Fallback: If not a direct asset file with extension, serve the employee project's exact index.html
+        const hasExt = Boolean(path.extname(req.path));
+        if (!hasExt) {
+          const indexPath = path.join(staticPath, 'index.html');
+          if (fs.existsSync(indexPath)) {
+            return res.sendFile(indexPath);
+          }
+        }
+        next();
+      });
+    }
   }
 
-  return res.status(404).send('Project is not running. Please click "Re-Run" in the toolbar.');
-});
+  return res.status(404).send('Live preview is not ready or has not been generated for this project. Please click "Re-Run" in the toolbar.');
+};
+
+// Mount dedicated preview endpoints (all 100% isolated to the submitted project)
+app.use('/previews/:productId', handlePreviewOrProxy);
+app.use('/api/proxy/:versionId', handlePreviewOrProxy);
+app.use('/api/preview/:versionId', handlePreviewOrProxy);
 
 // Health Check API
 app.get('/api/health', (req, res) => {

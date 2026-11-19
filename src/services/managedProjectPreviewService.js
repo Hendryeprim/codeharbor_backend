@@ -13,6 +13,18 @@ const getTimestamp = () => {
   return now.toTimeString().split(' ')[0];
 };
 
+const getCanonicalPreviewUrl = (previewDirName) => {
+  const subpath = `/previews/${previewDirName}/`;
+  if (process.env.BACKEND_PUBLIC_URL) {
+    return `${process.env.BACKEND_PUBLIC_URL.replace(/\/$/, '')}${subpath}`;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    return `https://api.coderharbor.com${subpath}`;
+  }
+  const port = process.env.PORT || 5050;
+  return `http://localhost:${port}${subpath}`;
+};
+
 /**
  * Clean path normalization
  */
@@ -685,7 +697,7 @@ export const generateManagedProjectPreview = async (options = {}) => {
         }
 
         logBuffer.push(`$ starting preview server...`);
-        logBuffer.push(`Local: http://localhost:5173/previews/${previewDirName}/`);
+        logBuffer.push(`Preview: ${getCanonicalPreviewUrl(previewDirName)}`);
         logBuffer.push(`✓ Preview Ready: Serving original project UI`);
         executionStatus = 'COMPLETED';
         buildStatus = 'PASSED';
@@ -735,7 +747,7 @@ export const generateManagedProjectPreview = async (options = {}) => {
             }
 
             logBuffer.push(`$ starting preview server...`);
-            logBuffer.push(`Local: http://localhost:5173/previews/${previewDirName}/`);
+            logBuffer.push(`Preview: ${getCanonicalPreviewUrl(previewDirName)}`);
             logBuffer.push(`✓ Preview Ready: Serving built application`);
             executionStatus = 'COMPLETED';
             buildStatus = 'PASSED';
@@ -761,7 +773,7 @@ export const generateManagedProjectPreview = async (options = {}) => {
         } else if (existingHtml) {
           // No build script but has index.html
           injectBaseTag(existingHtml, previewDirName);
-          logBuffer.push(`Local: http://localhost:5173/previews/${previewDirName}/`);
+          logBuffer.push(`Preview: ${getCanonicalPreviewUrl(previewDirName)}`);
           logBuffer.push(`✓ Preview Ready: Serving web application`);
           executionStatus = 'COMPLETED';
           buildStatus = 'PASSED';
@@ -846,7 +858,7 @@ export const generateManagedProjectPreview = async (options = {}) => {
         if (existingHtml) {
           injectBaseTag(existingHtml, previewDirName);
           logBuffer.push(`✓ Web frontend detected for Java project`);
-          logBuffer.push(`Local: http://localhost:5173/previews/${previewDirName}/`);
+          logBuffer.push(`Preview: ${getCanonicalPreviewUrl(previewDirName)}`);
           logBuffer.push(`✓ Preview Ready: Serving application UI`);
         } else {
           // Java Console application
