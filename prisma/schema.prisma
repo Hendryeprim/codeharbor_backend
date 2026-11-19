@@ -10,6 +10,7 @@ datasource db {
 enum Role {
   CUSTOMER
   ADMIN
+  EMPLOYEE
 }
 
 enum UserStatus {
@@ -89,6 +90,10 @@ model User {
   downloads       Download[]
   supportTickets  SupportTicket[]
   supportMessages SupportMessage[]
+
+  employeeProfile EmployeeProfile?
+  notifications   Notification[]
+  auditLogs       AuditLog[]
 
   @@map("users")
 }
@@ -288,5 +293,256 @@ model WebsiteSetting {
   updatedAt   DateTime @updatedAt
 
   @@map("website_settings")
+}
+
+model EmployeeProfile {
+  id           String              @id @default(uuid())
+  userId       String              @unique
+  employeeId   String              @unique
+  department   String
+  designation  String
+  primarySkill String
+  joiningDate  DateTime            @default(now())
+  status       String              @default("ACTIVE")
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skills       EmployeeSkill[]
+  assignments  ProjectAssignment[]
+  tasks        ProjectTask[]
+
+  @@map("employee_profiles")
+}
+
+model EmployeeSkill {
+  id                String          @id @default(uuid())
+  employeeProfileId String
+  skillName         String
+  proficiency       String?         @default("Intermediate")
+  verified          Boolean         @default(true)
+  createdAt         DateTime        @default(now())
+
+  employeeProfile   EmployeeProfile @relation(fields: [employeeProfileId], references: [id], onDelete: Cascade)
+
+  @@map("employee_skills")
+}
+
+model Project {
+  id                     String               @id @default(uuid())
+  title                  String
+  description            String               @db.Text
+  projectType            String
+  primarySkill           String
+  framework              String?
+  database               String?
+  frontend               String?
+  difficulty             String               @default("Medium")
+  priority               String               @default("Medium")
+  startDate              DateTime?
+  dueDate                DateTime?
+  objective              String?              @db.Text
+  technicalRequirements String?              @db.Text
+  additionalRequirements String?              @db.Text
+  referenceFiles         Json?
+  submissionRequirements Json?
+  executionConfig        Json?
+  status                 String               @default("ASSIGNED")
+  progress               Int                  @default(0)
+  createdById            String?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+
+  assignments            ProjectAssignment[]
+  requirements           ProjectRequirement[]
+  submissions            ProjectSubmission[]
+  tasks                  ProjectTask[]
+
+  @@map("managed_projects")
+}
+
+model ProjectAssignment {
+  id                String          @id @default(uuid())
+  projectId         String
+  employeeProfileId String
+  assignedAt        DateTime        @default(now())
+  status            String          @default("ASSIGNED")
+  score             Int?
+  startedAt         DateTime?
+  completedAt       DateTime?
+
+  project           Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  employeeProfile   EmployeeProfile @relation(fields: [employeeProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, employeeProfileId])
+  @@map("project_assignments")
+}
+
+model ProjectRequirement {
+  id          String   @id @default(uuid())
+  projectId   String
+  title       String
+  description String?
+  isCompleted Boolean  @default(false)
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("project_requirements")
+}
+
+model ProjectSubmission {
+  id                String            @id @default(uuid())
+  projectId         String
+  employeeProfileId String
+  currentVersion    Int               @default(1)
+  status            String            @default("SUBMITTED")
+  submittedAt       DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  project           Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  versions          ProjectVersion[]
+  feedbacks         ProjectFeedback[]
+
+  @@map("project_submissions")
+}
+
+model ProjectVersion {
+  id               String             @id @default(uuid())
+  submissionId     String
+  versionNumber    Int
+  filePath         String?
+  fileName         String?
+  fileSize         BigInt?
+  githubUrl        String?
+  liveDemoUrl      String?
+  readmeContent    String?            @db.Text
+  screenshots      Json?
+  documentation    String?            @db.Text
+  notes            String?            @db.Text
+  validationStatus String             @default("VALID")
+  validationReport Json?
+  createdAt        DateTime           @default(now())
+
+  submission       ProjectSubmission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  executions       ProjectExecution[]
+  feedbacks        ProjectFeedback[]
+
+  @@map("project_versions")
+}
+
+model ProjectExecution {
+  id           String              @id @default(uuid())
+  versionId    String
+  status       String              @default("PENDING")
+  buildStatus  String?
+  testStatus   String?
+  exitCode     Int?
+  runtimeMs    Int?
+  consoleLogs  String?             @db.Text
+  output       String?             @db.Text
+  errors       String?             @db.Text
+  warnings     String?             @db.Text
+  sandboxPath  String?
+  executedById String?
+  createdAt    DateTime            @default(now())
+  completedAt  DateTime?
+
+  version      ProjectVersion      @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  testResults  ProjectTestResult[]
+
+  @@map("project_executions")
+}
+
+model ProjectTestResult {
+  id          String           @id @default(uuid())
+  executionId String
+  testName    String
+  status      String
+  durationMs  Int?
+  message     String?
+  details     String?          @db.Text
+
+  execution   ProjectExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@map("project_test_results")
+}
+
+model ProjectFeedback {
+  id                 String             @id @default(uuid())
+  submissionId       String
+  versionId          String?
+  reviewerId         String
+  status             String
+  comments           String?            @db.Text
+  technicalFeedback  String?            @db.Text
+  requiredChanges    String?            @db.Text
+  testingFeedback    String?            @db.Text
+  revisionDeadline   DateTime?
+  rejectionReason    String?            @db.Text
+  scoreCodeQuality   Int?
+  scoreFunctionality Int?
+  scoreUiUx          Int?
+  scoreDatabase      Int?
+  scoreTesting       Int?
+  scoreDocumentation Int?
+  scorePerformance   Int?
+  scoreSecurity      Int?
+  overallScore       Int?
+  createdAt          DateTime           @default(now())
+
+  submission         ProjectSubmission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  version            ProjectVersion?    @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
+  @@map("project_feedbacks")
+}
+
+model ProjectTask {
+  id                String          @id @default(uuid())
+  projectId         String
+  employeeProfileId String
+  title             String
+  description       String?         @db.Text
+  priority          String          @default("Medium")
+  startDate         DateTime?
+  dueDate           DateTime?
+  status            String          @default("Pending")
+  createdById       String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  project           Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  employeeProfile   EmployeeProfile @relation(fields: [employeeProfileId], references: [id], onDelete: Cascade)
+
+  @@map("project_tasks")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  message   String   @db.Text
+  type      String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
 }
 

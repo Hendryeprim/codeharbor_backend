@@ -25,6 +25,17 @@ export const authenticate = async (req, res, next) => {
         status: true,
         avatar: true,
         createdAt: true,
+        employeeProfile: {
+          select: {
+            id: true,
+            employeeId: true,
+            department: true,
+            designation: true,
+            primarySkill: true,
+            status: true,
+            joiningDate: true,
+          },
+        },
       },
     });
 
@@ -63,6 +74,36 @@ export const requireAdmin = (req, res, next) => {
     return res.status(403).json({
       success: false,
       message: 'Access denied. Administrator privileges required.',
+    });
+  }
+  next();
+};
+
+export const requireEmployee = (req, res, next) => {
+  if (!req.user || req.user.role !== 'EMPLOYEE') {
+    return res.status(403).json({
+      success: false,
+      message: 'Access denied. Employee privileges required.',
+    });
+  }
+  next();
+};
+
+export const requireCustomer = (req, res, next) => {
+  if (!req.user || req.user.role !== 'CUSTOMER') {
+    return res.status(403).json({
+      success: false,
+      message: 'Access denied. Customer privileges required.',
+    });
+  }
+  next();
+};
+
+export const requireRole = (...roles) => (req, res, next) => {
+  if (!req.user || !roles.includes(req.user.role)) {
+    return res.status(403).json({
+      success: false,
+      message: `Access denied. Permitted roles: ${roles.join(', ')}`,
     });
   }
   next();

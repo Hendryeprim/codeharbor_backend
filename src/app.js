@@ -19,9 +19,17 @@ import technologyRoutes from './routes/technologyRoutes.js';
 import customerRoutes from './routes/customerRoutes.js';
 import supportRoutes from './routes/supportRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import employeeRoutes from './routes/employeeRoutes.js';
 import settingRoutes from './routes/settingRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import previewMockRoutes from './routes/previewMockRoutes.js';
+import { createProxyMiddleware } from 'http-proxy-middleware';
+import { activeExecutionsMap, EXECUTIONS_DIR } from './services/isolatedExecutionWorker.js';
+
+// Handle BigInt serialization in JSON responses globally
+BigInt.prototype.toJSON = function () {
+  return Number(this);
+};
 
 const app = express();
 
@@ -157,6 +165,45 @@ app.use(
   }
 );
 
+// ─── DYNAMIC SECURE REVERSE PROXY FOR LIVE EXECUTED PROJECTS ───────────────
+app.use('/api/proxy/:versionId', (req, res, next) => {
+  const { versionId } = req.params;
+  const active = activeExecutionsMap.get(versionId);
+
+  // Security & Frame Embedding Headers
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader(
+    'Content-Security-Policy',
+    "frame-ancestors 'self' http://localhost:* http://127.0.0.1:* https://coderharbor.com http://coderharbor.com *.coderharbor.com;"
+  );
+
+  if (active && active.port) {
+    const proxy = createProxyMiddleware({
+      target: `http://127.0.0.1:${active.port}`,
+      changeOrigin: true,
+      ws: true,
+      pathRewrite: (p) => p.replace(new RegExp(`^/api/proxy/${versionId}`), '') || '/',
+      onError: (err, req, res) => {
+        res.status(502).send(`Live project communication error on port ${active.port}: ${err.message}`);
+      },
+    });
+    return proxy(req, res, next);
+  }
+
+  // Fallback to static preview directory if available
+  const staticPath = path.join(PREVIEWS_DIR, `managed-${versionId}`);
+  if (fs.existsSync(staticPath)) {
+    return express.static(staticPath)(req, res, () => {
+      const indexPath = path.join(staticPath, 'index.html');
+      if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
+      next();
+    });
+  }
+
+  return res.status(404).send('Project is not running. Please click "Re-Run" in the toolbar.');
+});
+
 // Health Check API
 app.get('/api/health', (req, res) => {
   res.status(200).json({
@@ -179,6 +226,7 @@ app.use('/api/technologies', technologyRoutes);
 app.use('/api/customer', customerRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/employee', employeeRoutes);
 app.use('/api/settings', settingRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api', previewMockRoutes);

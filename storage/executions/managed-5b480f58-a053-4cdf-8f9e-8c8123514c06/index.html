@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>For My Special One 💙</title>
+  <meta name="description" content="A heartfelt love letter and proposal crafted just for you.">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Pacifico&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Poppins:wght@300;400;500;600;700&family=Dancing+Script:wght@400;700&display=swap" rel="stylesheet">
+
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Canvas Confetti CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+
+  <!-- ============================================
+       STARFIELD PARALLAX BACKGROUND (Pure CSS)
+       ============================================ -->
+  <div class="starfield">
+    <div class="star-layer star-layer-1" id="star-layer-1"></div>
+    <div class="star-layer star-layer-2" id="star-layer-2"></div>
+    <div class="star-layer star-layer-3" id="star-layer-3"></div>
+    <div class="shooting-star"></div>
+    <div class="shooting-star shooting-star-2"></div>
+  </div>
+
+  <!-- Ambient floating orbs -->
+  <div class="ambient-orbs">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <!-- Floating Hearts & Butterflies Canvas -->
+  <canvas id="particle-canvas"></canvas>
+
+  <!-- ============================================
+       SECTION 1: WELCOME SCREEN (FLIP CARD)
+       ============================================ -->
+  <section id="welcome-screen" class="screen active-screen">
+    <div class="welcome-card-wrapper" id="welcome-card-wrapper">
+      <div class="welcome-card">
+        
+        <!-- FRONT OF CARD -->
+        <div class="welcome-card-front">
+          <div class="welcome-card-border"></div>
+          <div class="heart-seal">
+            <i data-lucide="heart" class="heart-pulse-icon"></i>
+          </div>
+          <h2 class="cursive">For You chellow 💙</h2>
+          <p class="click-instruction">
+            <span class="pulse-dot"></span>
+            Tap to open
+          </p>
+        </div>
+
+        <!-- BACK OF CARD -->
+        <div class="welcome-card-back">
+          <div class="welcome-card-border"></div>
+          <h2 class="cursive">Hey Beautiful...</h2>
+          <p>I have a very special message<br>just for you.</p>
+          <button id="open-letter-btn" class="btn btn-primary glow-btn">
+            <i data-lucide="sparkles"></i>
+            <span>Let's Go!</span>
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================
+       MAIN APP CONTAINER
+       ============================================ -->
+  <main id="main-content" class="hidden">
+
+    <!-- ==========================================
+         SECTION 2: OUR LOVE TIMELINE
+         ========================================== -->
+    <section id="timeline-screen" class="screen content-section">
+      <div class="section-header">
+        <h2 class="section-title cursive">Our Beautiful Journey</h2>
+        <p class="section-subtitle">A walk down memory lane...</p>
+      </div>
+
+      <!-- The Key to My Heart (Interactive Idea) -->
+      <div class="destiny-card glass-card reveal-item" id="lock-card">
+        <h3 class="cursive destiny-title">The Key to My Heart 🗝️</h3>
+        <p class="destiny-quote">"My heart was closed off to the world, until you came along and found the perfect key."</p>
+        
+        <div class="lock-container" id="lock-container" onclick="unlockHeart()">
+          <div class="lock-glow" id="lock-glow"></div>
+          <div class="lock-wrapper" id="lock-wrapper">
+            <i data-lucide="lock" class="lock-icon" id="lock-icon"></i>
+            <i data-lucide="key" class="key-icon" id="key-icon"></i>
+            <i data-lucide="heart" class="unlocked-heart-icon hidden" id="unlocked-heart" fill="currentColor"></i>
+          </div>
+        </div>
+        
+        <p class="scanner-text click-instruction" id="lock-instruction">
+          <span class="pulse-dot"></span> Tap to insert the key
+        </p>
+
+        <div class="scan-result hidden" id="unlock-result">
+          <h3 class="match-text cursive">Heart Unlocked! 💖</h3>
+          <p>You hold the only key to my soul. My heart is yours forever.</p>
+        </div>
+      </div>
+
+      <!-- Timeline -->
+      <div class="timeline-container">
+        <div class="timeline-item left reveal-item">
+          <div class="timeline-content glass-card">
+            <span class="timeline-date">The Spark 💫</span>
+            <h3>When Paths Collided</h3>
+            <p>It began as a simple conversation, but something shifted in the universe. In that moment, the mundane turned magical, and I realized my soul had just recognized yours.</p>
+          </div>
+        </div>
+        <div class="timeline-item right reveal-item">
+          <div class="timeline-content glass-card">
+            <span class="timeline-date">The First Meeting 🌙</span>
+            <h3>Time Stood Still</h3>
+            <p>The moment I finally saw you, the rest of the world blurred into the background. Your smile was the most beautiful thing I had ever witnessed, and my heart hasn't stopped racing since.</p>
+          </div>
+        </div>
+        <div class="timeline-item left reveal-item">
+          <div class="timeline-content glass-card">
+            <span class="timeline-date">The Connection 🌌</span>
+            <h3>Falling Completely</h3>
+            <p>Through countless late-night whispers and shared dreams, you became my safe haven. I didn't just fall in love with you; I walked into love, choosing you every single day.</p>
+          </div>
+        </div>
+        <div class="timeline-item right reveal-item">
+          <div class="timeline-content glass-card">
+            <span class="timeline-date">The Realization 💙</span>
+            <h3>My Forever</h3>
+            <p>Looking back at every laugh, every tear, and every beautiful memory we've built, I realized something profound: you aren't just a chapter in my life. You are the entire book.</p>
+          </div>
+        </div>
+      </div>
+      <div style="text-align: center; margin-top: 40px; padding-bottom: 30px;">
+        <button class="btn btn-primary glow-btn" onclick="autoAdvanceNext()"><span>Next Page</span> <i data-lucide="arrow-right"></i></button>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         SECTION 3: SPECIAL GIFTS (Replaces Cards)
+         ========================================== -->
+    <section id="cards-screen" class="screen content-section">
+      <div class="section-header">
+        <h2 class="section-title cursive">Special Gifts for You</h2>
+        <p class="section-subtitle">Two small gifts, straight from my heart...</p>
+      </div>
+
+      <div class="gift-boxes-grid">
+        <!-- Gift Box 1 -->
+        <div class="interactive-gift-box glass-card reveal-item" onclick="openGiftModal('gift-modal-1')">
+          <h4 class="cursive">Gift 1</h4>
+          <div class="gift-emoji"><i data-lucide="gift" style="color: #3b82f6; width: 64px; height: 64px; margin: 0 auto; display: block;"></i></div>
+          <p class="click-instruction"><span class="pulse-dot"></span>Tap to open</p>
+        </div>
+
+        <!-- Gift Box 2 -->
+        <div class="interactive-gift-box glass-card reveal-item" style="animation-delay: 0.2s;" onclick="openGiftModal('gift-modal-2')">
+          <h4 class="cursive">Gift 2</h4>
+          <div class="gift-emoji"><i data-lucide="gift" style="color: #fbc02d; width: 64px; height: 64px; margin: 0 auto; display: block;"></i></div>
+          <p class="click-instruction"><span class="pulse-dot"></span>Tap to open</p>
+        </div>
+      </div>
+      <div style="text-align: center; margin-top: 40px; padding-bottom: 30px;">
+        <button class="btn btn-primary glow-btn" onclick="autoAdvanceNext()"><span>Next Page</span> <i data-lucide="arrow-right"></i></button>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         GIFT MODALS
+         ========================================== -->
+    <div id="gift-modal-1" class="gift-modal">
+      <div class="gift-modal-content glass-card">
+
+        <button class="close-modal" onclick="closeGiftModal('gift-modal-1')"><i data-lucide="x"></i></button>
+        <div class="custom-audio-player">
+          <div class="player-left">
+            <div class="album-art-wrapper">
+              <img src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=200&auto=format&fit=crop" alt="Album Art" class="album-art">
+            </div>
+            <p class="album-name">Gift 1</p>
+          </div>
+          <div class="player-right">
+            <h3 class="track-title cursive">Para-Para</h3>
+            <div class="player-timeline">
+              <span class="time current-time" id="curr-time-1">0:00</span>
+              <input type="range" id="seek-slider-1" class="styled-slider" value="0" max="100">
+              <span class="time total-time" id="tot-time-1">0:00</span>
+            </div>
+            <div class="player-controls">
+              <button class="ctrl-btn"><i data-lucide="skip-back" size="20"></i></button>
+              <button class="play-btn" id="play-pause-btn-1" onclick="toggleGiftAudio(1)">
+                <div id="icon-play-1"><i data-lucide="play" size="24" fill="currentColor"></i></div>
+                <div id="icon-pause-1" class="hidden"><i data-lucide="pause" size="24" fill="currentColor"></i></div>
+              </button>
+              <button class="ctrl-btn"><i data-lucide="skip-forward" size="20"></i></button>
+            </div>
+            <div class="player-volume">
+              <i data-lucide="volume-2" size="16"></i>
+              <input type="range" id="vol-slider-1" class="styled-slider" value="100" max="100">
+            </div>
+          </div>
+        </div>
+        <audio id="gift-audio-1" src="Para-Para.mp3" preload="metadata"></audio>
+
+      </div>
+    </div>
+    </div>
+
+    <div id="gift-modal-2" class="gift-modal">
+      <div class="gift-modal-content glass-card">
+
+        <button class="close-modal" onclick="closeGiftModal('gift-modal-2')"><i data-lucide="x"></i></button>
+        <div class="custom-audio-player">
+          <div class="player-left">
+            <div class="album-art-wrapper">
+              <img src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=200&auto=format&fit=crop" alt="Album Art" class="album-art">
+            </div>
+            <p class="album-name">Gift 2</p>
+          </div>
+          <div class="player-right">
+            <h3 class="track-title cursive">Machaan Machaan</h3>
+            <div class="player-timeline">
+              <span class="time current-time" id="curr-time-2">0:00</span>
+              <input type="range" id="seek-slider-2" class="styled-slider" value="0" max="100">
+              <span class="time total-time" id="tot-time-2">0:00</span>
+            </div>
+            <div class="player-controls">
+              <button class="ctrl-btn"><i data-lucide="skip-back" size="20"></i></button>
+              <button class="play-btn" id="play-pause-btn-2" onclick="toggleGiftAudio(2)">
+                <div id="icon-play-2"><i data-lucide="play" size="24" fill="currentColor"></i></div>
+                <div id="icon-pause-2" class="hidden"><i data-lucide="pause" size="24" fill="currentColor"></i></div>
+              </button>
+              <button class="ctrl-btn"><i data-lucide="skip-forward" size="20"></i></button>
+            </div>
+            <div class="player-volume">
+              <i data-lucide="volume-2" size="16"></i>
+              <input type="range" id="vol-slider-2" class="styled-slider" value="100" max="100">
+            </div>
+          </div>
+        </div>
+        <audio id="gift-audio-2" src="Machaan Machaan.mp3" preload="metadata"></audio>
+
+      </div>
+    </div>
+        </div>
+
+        <!-- Hidden Audio Element (Requires mp3 in folder to actually play) -->
+        <audio id="gift-audio" src="esa-kaaththa.mp3" preload="metadata"></audio>
+      </div>
+    </div>
+
+    <!-- ==========================================
+         SECTION 4: SECRET PROMISE (SCRATCH CARD)
+         ========================================== -->
+    <section id="promise-screen" class="screen content-section">
+      <div class="section-header">
+        <h2 class="section-title cursive">My Secret Promise</h2>
+        <p class="section-subtitle">Scratch the card to reveal my promise to you...</p>
+      </div>
+
+      <div class="scratch-card-wrapper glass-card">
+        <div class="scratch-card" id="scratch-card">
+          <canvas id="scratch-canvas" width="340" height="220"></canvas>
+          <div class="scratch-reveal" id="scratch-reveal">
+            <h3 class="cursive">I Promise You...</h3>
+            <p>To be your safe place when the world gets too loud. To hold your hand through every storm. To choose you, every single day, for the rest of my life. You are my forever. 💙</p>
+          </div>
+        </div>
+        <p class="scratch-hint">
+          <i data-lucide="hand" size="16"></i>
+          Use your finger or mouse to scratch
+        </p>
+      </div>
+      <div style="text-align: center; margin-top: 40px; padding-bottom: 30px;">
+        <button class="btn btn-primary glow-btn" onclick="autoAdvanceNext()"><span>Next Page</span> <i data-lucide="arrow-right"></i></button>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         SECTION 5: GALLERY
+         ========================================== -->
+    <section id="gallery-screen" class="screen content-section">
+      <div class="section-header">
+        <h2 class="section-title cursive">My Dearest chellow</h2>
+        <p class="section-subtitle">A letter straight from my heart to yours...</p>
+      </div>
+
+      <div class="love-envelope-wrapper reveal-item" id="chellow-envelope-wrapper" onclick="openchellowEnvelope()">
+        <div class="love-envelope">
+          <div class="love-letter-paper" id="chellow-letter-paper">
+            <div class="letter-content-text">
+              <p style="margin-bottom: 15px;"><strong>My beautiful chellow,</strong></p>
+              <p id="typed-chellow-body" class="typing-cursor"></p>
+              <p class="cursive" style="text-align: right; font-size: 1.3rem; color: #7e22ce; margin-top: 20px; opacity: 0; transition: opacity 1s ease;" id="chellow-sign-off">Yours always & forever 💙</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="click-instruction" id="envelope-click-hint" style="text-align:center; margin-bottom: 30px;"><span class="pulse-dot"></span> Tap the envelope to open</p>
+      
+      <div style="text-align: center; margin-top: 40px; padding-bottom: 30px;">
+        <button class="btn btn-primary glow-btn" onclick="autoAdvanceNext()"><span>Next Page</span> <i data-lucide="arrow-right"></i></button>
+      </div>
+    </section>
+
+
+
+
+    <!-- ==========================================
+         SECTION 6: THE PROPOSAL
+         ========================================== -->
+    <section id="proposal-screen" class="screen content-section">
+      <div class="proposal-container">
+        <!-- 3D Ring Animation -->
+        <div class="ring-scene">
+          <div class="ring-3d">
+            <div class="ring-band"></div>
+            <div class="ring-diamond">
+              <div class="diamond-sparkle sparkle-1"></div>
+              <div class="diamond-sparkle sparkle-2"></div>
+              <div class="diamond-sparkle sparkle-3"></div>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="proposal-question cursive">Will you be my forever?</h2>
+        <p class="proposal-context">I want to write the rest of my chapters with you. A life full of love, laughter, and endless adventures together.</p>
+
+        <div class="proposal-buttons">
+          <button id="yes-btn" class="btn btn-success btn-lg glow-btn">YES! 💍💙</button>
+          <button id="no-btn" class="btn btn-danger btn-lg">No 😢</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         SECTION 7: CELEBRATION
+         ========================================== -->
+    <section id="celebration-screen" class="screen content-section">
+      <div class="celebration-container">
+        <h1 class="celebration-title cursive">She Said Yes! 🎉</h1>
+
+        <div class="celebration-illustration glow-border">
+          <img id="celebration-img" src="celebration_love.jpg" alt="Happy couple illustration" class="hidden-img">
+          <div id="image-spinner" class="spinner"></div>
+        </div>
+
+        <div class="celebration-letter glass-card">
+          <h3 class="cursive">You've Made Me the Happiest Person Alive!</h3>
+          <p id="celebration-text-typed"></p>
+          <span id="celebration-sign-off" class="letter-sign-off cursive" style="opacity: 0; transition: opacity 1.5s ease-in-out;">— Yours Forever 💙</span>
+        </div>
+
+        <a href="https://ig.me/m/fight_god_10" target="_blank" class="btn btn-instagram glow-btn" id="instagram-btn" onclick="copyLoveMessage()">
+          <i data-lucide="send"></i>
+          <span>Message me</span>
+        </a>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============================================
+       BOTTOM NAVIGATION BAR (REMOVED)
+       ============================================ -->
+
+  <!-- ============================================
+       LIGHTBOX FOR GALLERY
+       ============================================ -->
+  <div id="lightbox" class="lightbox hidden">
+    <button id="lightbox-close" class="lightbox-close">
+      <i data-lucide="x"></i>
+    </button>
+    <img id="lightbox-img" src="" alt="Enlarged photo">
+  </div>
+
+  <!-- Script -->
+  <script src="script.js?v=6"></script>
+</body>
+</html>

@@ -25,6 +25,37 @@ import {
   getWebsiteSettings,
   updateWebsiteSetting,
 } from '../controllers/adminController.js';
+import {
+  getAdminPortalDashboardStats,
+  getAllEmployees,
+  createEmployee,
+  getEmployeeById,
+  updateEmployee,
+  toggleEmployeeStatus,
+  getEmployeePerformance,
+  getEmployeeSkills,
+  getAllManagedProjects,
+  createManagedProject,
+  getManagedProjectById,
+  updateManagedProject,
+  deleteManagedProject,
+  getAllProjectReviews,
+  getProjectReviewById,
+  runVersionExecution,
+  stopVersionExecution,
+  submitProjectReviewFeedback,
+  downloadSubmissionVersionFile,
+  getAdminProjectExecution,
+  getAllTasks,
+  createTask,
+  updateTask,
+  deleteTask,
+  getAllExecutions,
+  getExecutionById,
+  getAdminNotifications,
+  markNotificationRead,
+  getAuditLogs,
+} from '../controllers/adminPortalController.js';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
 import { uploadImage, uploadProjectArchive } from '../middleware/upload.js';
 
@@ -34,9 +65,51 @@ const router = express.Router();
 router.use(authenticate, requireAdmin);
 
 // Dashboard
-router.get('/dashboard', getDashboardStats);
+router.get('/dashboard', getAdminPortalDashboardStats);
+router.get('/marketplace-dashboard', getDashboardStats);
 
-// Products
+// Employees Management
+router.get('/employees', getAllEmployees);
+router.post('/employees', createEmployee);
+router.get('/employees/performance', getEmployeePerformance);
+router.get('/employees/skills', getEmployeeSkills);
+router.get('/employees/:id', getEmployeeById);
+router.patch('/employees/:id', updateEmployee);
+router.put('/employees/:id', updateEmployee);
+router.patch('/employees/:id/status', toggleEmployeeStatus);
+
+// Managed Projects Management
+router.get('/managed-projects', getAllManagedProjects);
+router.post('/managed-projects', createManagedProject);
+router.get('/managed-projects/:id', getManagedProjectById);
+router.patch('/managed-projects/:id', updateManagedProject);
+router.delete('/managed-projects/:id', deleteManagedProject);
+
+// Project Reviews & Executions
+router.get('/project-reviews', getAllProjectReviews);
+router.get('/project-reviews/:submissionId', getProjectReviewById);
+router.get('/project-reviews/:versionId/execution', getAdminProjectExecution);
+router.post('/project-reviews/:versionId/run', runVersionExecution);
+router.post('/project-reviews/:versionId/stop', stopVersionExecution);
+router.get('/project-reviews/:versionId/download', downloadSubmissionVersionFile);
+router.post('/project-reviews/:submissionId/feedback', submitProjectReviewFeedback);
+
+// Tasks Management
+router.get('/tasks', getAllTasks);
+router.post('/tasks', createTask);
+router.patch('/tasks/:id', updateTask);
+router.delete('/tasks/:id', deleteTask);
+
+// Executions Log
+router.get('/executions', getAllExecutions);
+router.get('/executions/:id', getExecutionById);
+
+// Notifications & Audit Logs
+router.get('/notifications', getAdminNotifications);
+router.patch('/notifications/:id/read', markNotificationRead);
+router.get('/audit-logs', getAuditLogs);
+
+// Products (Marketplace existing)
 router.get('/products', getAdminProducts);
 router.post('/products', createProduct);
 router.get('/products/:id', getAdminProductById);
