@@ -23,7 +23,7 @@ import employeeRoutes from './routes/employeeRoutes.js';
 import settingRoutes from './routes/settingRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import previewMockRoutes from './routes/previewMockRoutes.js';
-import { createProxyMiddleware } from 'http-proxy-middleware';
+import http from 'http';
 import { activeExecutionsMap, EXECUTIONS_DIR } from './services/isolatedExecutionWorker.js';
 
 // Handle BigInt serialization in JSON responses globally
@@ -179,16 +179,34 @@ app.use('/api/proxy/:versionId', (req, res, next) => {
   );
 
   if (active && active.port) {
-    const proxy = createProxyMiddleware({
-      target: `http://127.0.0.1:${active.port}`,
-      changeOrigin: true,
-      ws: true,
-      pathRewrite: (p) => p.replace(new RegExp(`^/api/proxy/${versionId}`), '') || '/',
-      onError: (err, req, res) => {
-        res.status(502).send(`Live project communication error on port ${active.port}: ${err.message}`);
+    const targetPath = req.originalUrl.replace(new RegExp(`^/api/proxy/${versionId}`), '') || '/';
+    const proxyHeaders = { ...req.headers };
+    proxyHeaders.host = `127.0.0.1:${active.port}`;
+
+    const proxyReq = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: active.port,
+        path: targetPath,
+        method: req.method,
+        headers: proxyHeaders,
       },
+      (proxyRes) => {
+        const resHeaders = { ...proxyRes.headers };
+        delete resHeaders['x-frame-options'];
+        res.writeHead(proxyRes.statusCode, resHeaders);
+        proxyRes.pipe(res, { end: true });
+      }
+    );
+
+    proxyReq.on('error', (err) => {
+      if (!res.headersSent) {
+        res.status(502).send(`Live project communication error on port ${active.port}: ${err.message}`);
+      }
     });
-    return proxy(req, res, next);
+
+    req.pipe(proxyReq, { end: true });
+    return;
   }
 
   // Fallback to static preview directory if available
