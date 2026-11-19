@@ -527,7 +527,7 @@ export const generateManagedProjectPreview = async (options = {}) => {
         employeeName = employeeName || profile.user?.name || 'Employee';
         employeeId = employeeId || profile.employeeId || 'EMP';
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   const previewDirName = `managed-${version.id}`;
@@ -536,7 +536,7 @@ export const generateManagedProjectPreview = async (options = {}) => {
   if (fs.existsSync(targetDir)) {
     try {
       fs.rmSync(targetDir, { recursive: true, force: true });
-    } catch (e) {}
+    } catch (e) { }
   }
   fs.mkdirSync(targetDir, { recursive: true });
 
