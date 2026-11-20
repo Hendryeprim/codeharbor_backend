@@ -169,12 +169,15 @@ export const copyRecursiveSync = (src, dest, ignore = ['node_modules', '.git', '
 };
 
 /**
- * Inject base tag into head of HTML
+ * Inject base tag into head of HTML and rewrite absolute assets to relative
  */
 export const injectBaseTag = (htmlPath, previewDirName) => {
   try {
     let html = fs.readFileSync(htmlPath, 'utf8');
-    const baseTag = `<base href="/previews/${previewDirName}/">`;
+    const baseHrefClean = (previewDirName || '').startsWith('/') ? previewDirName : `/previews/${previewDirName}/`;
+    const normalizedBaseHref = baseHrefClean.endsWith('/') ? baseHrefClean : `${baseHrefClean}/`;
+    const baseTag = `<base href="${normalizedBaseHref}">`;
+
     if (!html.includes('<base')) {
       if (html.includes('<head>')) {
         html = html.replace('<head>', `<head>\n  ${baseTag}`);
@@ -183,8 +186,46 @@ export const injectBaseTag = (htmlPath, previewDirName) => {
       } else {
         html = `${baseTag}\n${html}`;
       }
-      fs.writeFileSync(htmlPath, html, 'utf8');
     }
+
+    // 1. Rewrite root-relative asset directories (/images/..., /img/..., /assets/...) to relative ./
+    html = html.replace(
+      /(href|src|data-src|poster)=["']\/(assets|images|img|imgs|image|static|public|media|photos|pic|pictures|icons|css|js|vendor|uploads)\/([^"'>]+)["']/gi,
+      '$1="./$2/$3"'
+    );
+
+    // 2. Rewrite root-relative file extensions like src="/deal.png" or href="/style.css"
+    html = html.replace(
+      /(href|src|data-src|poster)=["']\/([^"' >/]+\.(?:png|jpg|jpeg|gif|svg|webp|ico|bmp|avif|css|js|mjs|woff2?|ttf|eot|mp4|webm))["']/gi,
+      '$1="./$2"'
+    );
+
+    // 3. Rewrite CSS url('/...') inside <style> blocks or inline styles
+    html = html.replace(
+      /url\(\s*["']?\/(assets|images|img|imgs|image|static|public|media|photos|pic|pictures|icons)\/([^"')>]+)["']?\s*\)/gi,
+      'url("./$1/$2")'
+    );
+    html = html.replace(
+      /url\(\s*["']?\/([^"')>/]+\.(?:png|jpg|jpeg|gif|svg|webp|ico|bmp|avif))["']?\s*\)/gi,
+      'url("./$1")'
+    );
+
+    // 4. Rewrite srcset attributes
+    html = html.replace(/srcset=["']([^"']+)["']/gi, (match, srcsetValue) => {
+      const rewritten = srcsetValue
+        .split(',')
+        .map((part) => {
+          const trimmed = part.trim();
+          if (trimmed.startsWith('/')) {
+            return `./${trimmed.replace(/^\/+/, '')}`;
+          }
+          return trimmed;
+        })
+        .join(', ');
+      return `srcset="${rewritten}"`;
+    });
+
+    fs.writeFileSync(htmlPath, html, 'utf8');
   } catch (e) {
     console.warn('[ManagedPreview] Failed to inject base tag:', e.message);
   }

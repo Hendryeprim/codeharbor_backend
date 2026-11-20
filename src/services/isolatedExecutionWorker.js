@@ -118,12 +118,91 @@ export const findIndexHtml = (dir) => {
 };
 
 /**
+ * Recursively sync common image/asset folders from source repository into static preview folder
+ */
+export const syncCommonAssetDirectories = (sourceDir, targetPreviewDir) => {
+  if (!fs.existsSync(sourceDir) || !fs.existsSync(targetPreviewDir)) return;
+  const assetDirNames = [
+    'images',
+    'img',
+    'imgs',
+    'image',
+    'assets',
+    'public',
+    'static',
+    'media',
+    'photos',
+    'pic',
+    'pictures',
+    'icons',
+    'uploads',
+  ];
+
+  for (const name of assetDirNames) {
+    const srcAsset = path.join(sourceDir, name);
+    if (fs.existsSync(srcAsset) && fs.statSync(srcAsset).isDirectory()) {
+      const destAsset = path.join(targetPreviewDir, name);
+      if (!fs.existsSync(destAsset)) {
+        copyRecursiveSync(srcAsset, destAsset);
+      }
+    }
+  }
+
+  // Also check if sourceDir/public contains images, img, assets
+  const publicDir = path.join(sourceDir, 'public');
+  if (fs.existsSync(publicDir) && fs.statSync(publicDir).isDirectory()) {
+    for (const name of ['images', 'img', 'imgs', 'image', 'assets', 'static', 'media', 'photos', 'icons']) {
+      const srcSub = path.join(publicDir, name);
+      if (fs.existsSync(srcSub) && fs.statSync(srcSub).isDirectory()) {
+        const destSub = path.join(targetPreviewDir, name);
+        if (!fs.existsSync(destSub)) {
+          copyRecursiveSync(srcSub, destSub);
+        }
+      }
+    }
+  }
+};
+
+/**
+ * Scan and rewrite root-relative asset URLs inside CSS files so background images load reliably
+ */
+export const rewriteCssFiles = (dir) => {
+  if (!fs.existsSync(dir)) return;
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const ent of entries) {
+      if (['node_modules', '.git', '_temp_clone'].includes(ent.name)) continue;
+      const fullPath = path.join(dir, ent.name);
+      if (ent.isDirectory()) {
+        rewriteCssFiles(fullPath);
+      } else if (ent.isFile() && ent.name.toLowerCase().endsWith('.css')) {
+        let css = fs.readFileSync(fullPath, 'utf8');
+        let modified = false;
+        if (/url\(\s*["']?\/(assets|images|img|imgs|image|static|public|media|photos|pic|icons)\//i.test(css)) {
+          css = css.replace(
+            /url\(\s*(['"]?)\/(assets|images|img|imgs|image|static|public|media|photos|pic|icons)\/([^'")>]+)\1\s*\)/gi,
+            'url($1../$2/$3$1)'
+          );
+          modified = true;
+        }
+        if (modified) {
+          fs.writeFileSync(fullPath, css, 'utf8');
+        }
+      }
+    }
+  } catch (e) {}
+};
+
+/**
  * Inject base tag into head of HTML and rewrite absolute assets to relative
  */
 export const injectBaseTag = (htmlPath, baseHref) => {
   try {
     let html = fs.readFileSync(htmlPath, 'utf8');
-    const baseTag = `<base href="${baseHref}">`;
+    const baseHrefClean = (baseHref || '').startsWith('/') ? baseHref : `/previews/${baseHref}/`;
+    const normalizedBaseHref = baseHrefClean.endsWith('/') ? baseHrefClean : `${baseHrefClean}/`;
+    const baseTag = `<base href="${normalizedBaseHref}">`;
+
     if (!html.includes('<base')) {
       if (html.includes('<head>')) {
         html = html.replace('<head>', `<head>\n  ${baseTag}`);
@@ -133,10 +212,48 @@ export const injectBaseTag = (htmlPath, baseHref) => {
         html = `${baseTag}\n${html}`;
       }
     }
-    // Rewrite root-relative asset URLs to relative for reliable subpath hosting without falling back to CodeHarbor
-    html = html.replace(/(href|src)="\/(assets|favicon|logo|icons|static|css|js|images)/g, '$1="./$2');
-    html = html.replace(/(href|src)='\/(assets|favicon|logo|icons|static|css|js|images)/g, "$1='./$2");
+
+    // 1. Rewrite root-relative asset directories (/images/..., /img/..., /assets/...) to relative ./
+    html = html.replace(
+      /(href|src|data-src|poster)=["']\/(assets|images|img|imgs|image|static|public|media|photos|pic|pictures|icons|css|js|vendor|uploads)\/([^"'>]+)["']/gi,
+      '$1="./$2/$3"'
+    );
+
+    // 2. Rewrite root-relative file extensions like src="/deal.png" or href="/style.css"
+    html = html.replace(
+      /(href|src|data-src|poster)=["']\/([^"' >/]+\.(?:png|jpg|jpeg|gif|svg|webp|ico|bmp|avif|css|js|mjs|woff2?|ttf|eot|mp4|webm))["']/gi,
+      '$1="./$2"'
+    );
+
+    // 3. Rewrite CSS url('/...') inside <style> blocks or inline styles
+    html = html.replace(
+      /url\(\s*["']?\/(assets|images|img|imgs|image|static|public|media|photos|pic|pictures|icons)\/([^"')>]+)["']?\s*\)/gi,
+      'url("./$1/$2")'
+    );
+    html = html.replace(
+      /url\(\s*["']?\/([^"')>/]+\.(?:png|jpg|jpeg|gif|svg|webp|ico|bmp|avif))["']?\s*\)/gi,
+      'url("./$1")'
+    );
+
+    // 4. Rewrite srcset attributes
+    html = html.replace(/srcset=["']([^"']+)["']/gi, (match, srcsetValue) => {
+      const rewritten = srcsetValue
+        .split(',')
+        .map((part) => {
+          const trimmed = part.trim();
+          if (trimmed.startsWith('/')) {
+            return `./${trimmed.replace(/^\/+/, '')}`;
+          }
+          return trimmed;
+        })
+        .join(', ');
+      return `srcset="${rewritten}"`;
+    });
+
     fs.writeFileSync(htmlPath, html, 'utf8');
+
+    // Also rewrite all CSS files in the project preview directory
+    rewriteCssFiles(path.dirname(htmlPath));
   } catch (e) {
     console.warn('[ExecutionWorker] injectBaseTag error:', e.message);
   }
@@ -408,6 +525,8 @@ export const runIsolatedProjectExecution = async ({ versionId, executedById = nu
 
       const htmlDir = path.dirname(existingHtml);
       copyRecursiveSync(htmlDir, staticPreviewDir);
+      // Synchronize sibling/root image and asset folders into preview workspace
+      syncCommonAssetDirectories(targetDir, staticPreviewDir);
 
       const rootHtml = path.join(staticPreviewDir, 'index.html');
       if (fs.existsSync(rootHtml)) {
@@ -472,6 +591,8 @@ export const runIsolatedProjectExecution = async ({ versionId, executedById = nu
 
             const builtDir = path.dirname(builtHtml);
             copyRecursiveSync(builtDir, staticPreviewDir);
+            // Synchronize root assets, images, and public folder into build preview
+            syncCommonAssetDirectories(targetDir, staticPreviewDir);
 
             const rootHtml = path.join(staticPreviewDir, 'index.html');
             if (fs.existsSync(rootHtml)) {
