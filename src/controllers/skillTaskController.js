@@ -619,14 +619,47 @@ export const updateAdminTask = async (req, res, next) => {
 };
 
 /**
- * Delete task
+ * Delete task (safe & idempotent)
  */
 export const deleteAdminTask = async (req, res, next) => {
   try {
     const { taskId } = req.params;
-    await prisma.skillTask.delete({ where: { id: taskId } });
-    res.status(200).json({ success: true, message: 'Task deleted successfully.' });
+
+    if (!taskId) {
+      return res.status(400).json({ success: false, message: 'Task ID is required.' });
+    }
+
+    const existingTask = await prisma.skillTask.findUnique({
+      where: { id: taskId },
+    });
+
+    if (!existingTask) {
+      return res.status(200).json({
+        success: true,
+        message: 'Task already deleted or does not exist.',
+      });
+    }
+
+    // Cascade delete any submissions linked to this task
+    await prisma.skillTaskSubmission.deleteMany({
+      where: { taskId },
+    });
+
+    await prisma.skillTask.delete({
+      where: { id: taskId },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Task deleted successfully.',
+    });
   } catch (error) {
+    if (error.code === 'P2025') {
+      return res.status(200).json({
+        success: true,
+        message: 'Task already deleted.',
+      });
+    }
     next(error);
   }
 };
