@@ -1,7 +1,6 @@
 import app from './app.js';
 import { config } from './config/index.js';
 import prisma from './database/prisma.js';
-import { seedCurriculumDatabase } from './scripts/seed-curriculum.js';
 
 const startServer = async () => {
   try {
@@ -9,10 +8,21 @@ const startServer = async () => {
     await prisma.$connect();
     console.log('✓ Successfully connected to PostgreSQL database (coderharbor_db)');
 
-    // Automatically ensure curriculum tracks (Python, Java, SQL, Data Analysis, Software Testing) are seeded
-    seedCurriculumDatabase().catch((seedErr) => {
-      console.warn('[Curriculum Auto-Seed] Notice:', seedErr.message);
-    });
+    // Ensure core skill tracks exist (without any pre-seeded sample tasks)
+    const coreSkills = [
+      { name: 'Python', slug: 'python', description: 'Python programming & problem solving' },
+      { name: 'Java', slug: 'java', description: 'Java object-oriented application development' },
+      { name: 'SQL', slug: 'sql', description: 'Relational database queries & data management' },
+      { name: 'Data Analysis', slug: 'data-analysis', description: 'Data analytics, reporting, and metrics' },
+      { name: 'Software Testing', slug: 'software-testing', description: 'Quality assurance, test cases, and validation' },
+    ];
+    for (const s of coreSkills) {
+      await prisma.skill.upsert({
+        where: { slug: s.slug },
+        update: {},
+        create: { name: s.name, slug: s.slug, description: s.description },
+      }).catch(() => {});
+    }
 
     const server = app.listen(config.port, () => {
       console.log(`===============================================`);

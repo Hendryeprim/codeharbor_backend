@@ -564,10 +564,13 @@ export const createAdminTask = async (req, res, next) => {
       status,
     } = req.body;
 
-    if (!skillId || !title || !description || !instructions) {
+    const desc = (description || instructions || '').trim();
+    const inst = (instructions || description || '').trim();
+
+    if (!skillId || !title || (!desc && !inst)) {
       return res.status(400).json({
         success: false,
-        message: 'Please fill in skill, title, description, and instructions.',
+        message: 'Please provide skill, task title, and instructions.',
       });
     }
 
@@ -580,13 +583,13 @@ export const createAdminTask = async (req, res, next) => {
         skillId,
         level: level || 'BASIC',
         title: title.trim(),
-        description: description.trim(),
-        instructions: instructions.trim(),
-        expectedOutput: expectedOutput || null,
+        description: desc,
+        instructions: inst,
+        expectedOutput: expectedOutput ? expectedOutput.trim() : null,
         difficulty: difficulty || 'EASY',
         githubRepoUrl: githubRepoUrl ? githubRepoUrl.trim() : null,
         githubBranch: githubBranch ? githubBranch.trim() : 'main',
-        initialCode: initialCode || null,
+        initialCode: initialCode ? initialCode.trim() : null,
         isRequired: isRequired !== undefined ? Boolean(isRequired) : true,
         status: status || 'ACTIVE',
         orderIndex: count + 1,
@@ -660,6 +663,26 @@ export const deleteAdminTask = async (req, res, next) => {
         message: 'Task already deleted.',
       });
     }
+    next(error);
+  }
+};
+
+/**
+ * Clear all curriculum tasks and submissions (reset back to 0 tasks)
+ */
+export const clearAllAdminTasks = async (req, res, next) => {
+  try {
+    const delSubs = await prisma.skillTaskSubmission.deleteMany({});
+    const delTasks = await prisma.skillTask.deleteMany({});
+    await prisma.employeeSkillProgress.deleteMany({});
+
+    res.status(200).json({
+      success: true,
+      message: `Cleared all tasks successfully (${delTasks.count} tasks removed). Skills are now reset to 0 tasks.`,
+      deletedTasks: delTasks.count,
+      deletedSubmissions: delSubs.count,
+    });
+  } catch (error) {
     next(error);
   }
 };

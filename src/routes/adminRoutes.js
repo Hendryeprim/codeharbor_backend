@@ -69,6 +69,7 @@ import {
   reviewTaskSubmission,
   getAdminSkillProgressDashboard,
   getAdminSkillStats,
+  clearAllAdminTasks,
 } from '../controllers/skillTaskController.js';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
 import { uploadImage, uploadProjectArchive } from '../middleware/upload.js';
@@ -168,6 +169,7 @@ router.post('/curriculum/skills', createAdminSkill);
 
 router.get('/curriculum/tasks', getAdminTasks);
 router.post('/curriculum/tasks', createAdminTask);
+router.post('/curriculum/tasks/clear-all', clearAllAdminTasks);
 router.patch('/curriculum/tasks/:taskId', updateAdminTask);
 router.put('/curriculum/tasks/:taskId', updateAdminTask);
 router.delete('/curriculum/tasks/:taskId', deleteAdminTask);
