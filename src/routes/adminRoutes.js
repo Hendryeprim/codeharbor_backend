@@ -56,6 +56,20 @@ import {
   markNotificationRead,
   getAuditLogs,
 } from '../controllers/adminPortalController.js';
+import {
+  getAdminSkills,
+  createAdminSkill,
+  getAdminTasks,
+  createAdminTask,
+  updateAdminTask,
+  deleteAdminTask,
+  assignEmployeeSkills,
+  getAdminSubmissions,
+  runAdminSubmissionCode,
+  reviewTaskSubmission,
+  getAdminSkillProgressDashboard,
+  getAdminSkillStats,
+} from '../controllers/skillTaskController.js';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
 import { uploadImage, uploadProjectArchive } from '../middleware/upload.js';
 
@@ -147,6 +161,25 @@ router.post('/upload/github-link', importProjectGithubLink);
 // Settings
 router.get('/settings', getWebsiteSettings);
 router.patch('/settings', updateWebsiteSetting);
+
+// ─── SKILL-BASED TASK & CURRICULUM MANAGEMENT (ADMIN) ─────────────────────────
+router.get('/curriculum/skills', getAdminSkills);
+router.post('/curriculum/skills', createAdminSkill);
+
+router.get('/curriculum/tasks', getAdminTasks);
+router.post('/curriculum/tasks', createAdminTask);
+router.patch('/curriculum/tasks/:taskId', updateAdminTask);
+router.put('/curriculum/tasks/:taskId', updateAdminTask);
+router.delete('/curriculum/tasks/:taskId', deleteAdminTask);
+
+router.post('/curriculum/employees/:employeeProfileId/skills', assignEmployeeSkills);
+
+router.get('/curriculum/submissions', getAdminSubmissions);
+router.post('/curriculum/submissions/:submissionId/run', runAdminSubmissionCode);
+router.post('/curriculum/submissions/:submissionId/review', reviewTaskSubmission);
+
+router.get('/curriculum/progress-matrix', getAdminSkillProgressDashboard);
+router.get('/curriculum/stats', getAdminSkillStats);
 
 export default router;
 

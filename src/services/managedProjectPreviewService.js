@@ -177,15 +177,17 @@ export const injectBaseTag = (htmlPath, previewDirName) => {
     const baseHrefClean = (previewDirName || '').startsWith('/') ? previewDirName : `/previews/${previewDirName}/`;
     const normalizedBaseHref = baseHrefClean.endsWith('/') ? baseHrefClean : `${baseHrefClean}/`;
     const baseTag = `<base href="${normalizedBaseHref}">`;
+    const metaReferrer = `<meta name="referrer" content="unsafe-url">`;
 
-    if (!html.includes('<base')) {
-      if (html.includes('<head>')) {
-        html = html.replace('<head>', `<head>\n  ${baseTag}`);
-      } else if (html.includes('<HEAD>')) {
-        html = html.replace('<HEAD>', `<HEAD>\n  ${baseTag}`);
-      } else {
-        html = `${baseTag}\n${html}`;
-      }
+    // Replace existing <base> tag or inject into head
+    if (/<base\s+[^>]*>/i.test(html)) {
+      html = html.replace(/<base\s+[^>]*>/i, baseTag);
+    } else if (/<head>/i.test(html)) {
+      html = html.replace(/<head>/i, `<head>\n  ${baseTag}\n  ${metaReferrer}`);
+    } else if (/<HEAD>/i.test(html)) {
+      html = html.replace(/<HEAD>/i, `<HEAD>\n  ${baseTag}\n  ${metaReferrer}`);
+    } else {
+      html = `${baseTag}\n${metaReferrer}\n${html}`;
     }
 
     // 1. Rewrite root-relative asset directories (/images/..., /img/..., /assets/...) to relative ./
@@ -196,7 +198,7 @@ export const injectBaseTag = (htmlPath, previewDirName) => {
 
     // 2. Rewrite root-relative file extensions like src="/deal.png" or href="/style.css"
     html = html.replace(
-      /(href|src|data-src|poster)=["']\/([^"' >/]+\.(?:png|jpg|jpeg|gif|svg|webp|ico|bmp|avif|css|js|mjs|woff2?|ttf|eot|mp4|webm))["']/gi,
+      /(href|src|data-src|poster)=["']\/([^"' >/]+\.(?:png|jpg|jpeg|jfif|pjpeg|pjp|gif|svg|webp|ico|bmp|avif|tiff|tif|css|js|mjs|woff2?|ttf|eot|mp4|webm))["']/gi,
       '$1="./$2"'
     );
 
@@ -206,7 +208,7 @@ export const injectBaseTag = (htmlPath, previewDirName) => {
       'url("./$1/$2")'
     );
     html = html.replace(
-      /url\(\s*["']?\/([^"')>/]+\.(?:png|jpg|jpeg|gif|svg|webp|ico|bmp|avif))["']?\s*\)/gi,
+      /url\(\s*["']?\/([^"')>/]+\.(?:png|jpg|jpeg|jfif|pjpeg|pjp|gif|svg|webp|ico|bmp|avif|tiff|tif))["']?\s*\)/gi,
       'url("./$1")'
     );
 

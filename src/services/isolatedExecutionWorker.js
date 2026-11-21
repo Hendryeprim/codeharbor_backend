@@ -122,45 +122,75 @@ export const findIndexHtml = (dir) => {
  */
 export const syncCommonAssetDirectories = (sourceDir, targetPreviewDir) => {
   if (!fs.existsSync(sourceDir) || !fs.existsSync(targetPreviewDir)) return;
+
+  const imageExts = ['.png', '.jpg', '.jpeg', '.jfif', '.pjpeg', '.pjp', '.gif', '.svg', '.webp', '.ico', '.bmp', '.avif', '.tiff', '.tif'];
   const assetDirNames = [
-    'images',
-    'img',
-    'imgs',
-    'image',
-    'assets',
-    'public',
-    'static',
-    'media',
-    'photos',
-    'pic',
-    'pictures',
-    'icons',
-    'uploads',
+    'images', 'img', 'imgs', 'image', 'assets', 'public', 'static', 'media',
+    'photos', 'pic', 'pictures', 'icons', 'uploads'
   ];
 
-  for (const name of assetDirNames) {
-    const srcAsset = path.join(sourceDir, name);
-    if (fs.existsSync(srcAsset) && fs.statSync(srcAsset).isDirectory()) {
-      const destAsset = path.join(targetPreviewDir, name);
-      if (!fs.existsSync(destAsset)) {
-        copyRecursiveSync(srcAsset, destAsset);
-      }
-    }
-  }
+  // 1. Recursively find and copy all asset directories in sourceDir (case-insensitive)
+  const copyAssetDirsRecursive = (dir, depth = 0) => {
+    if (depth > 4) return;
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (!ent.isDirectory() || ['node_modules', '.git', '_temp_clone'].includes(ent.name)) continue;
+        const full = path.join(dir, ent.name);
+        const lower = ent.name.toLowerCase();
 
-  // Also check if sourceDir/public contains images, img, assets
-  const publicDir = path.join(sourceDir, 'public');
-  if (fs.existsSync(publicDir) && fs.statSync(publicDir).isDirectory()) {
-    for (const name of ['images', 'img', 'imgs', 'image', 'assets', 'static', 'media', 'photos', 'icons']) {
-      const srcSub = path.join(publicDir, name);
-      if (fs.existsSync(srcSub) && fs.statSync(srcSub).isDirectory()) {
-        const destSub = path.join(targetPreviewDir, name);
-        if (!fs.existsSync(destSub)) {
-          copyRecursiveSync(srcSub, destSub);
+        if (assetDirNames.includes(lower)) {
+          // Copy to targetPreviewDir/<original-name>
+          const destSub = path.join(targetPreviewDir, ent.name);
+          copyRecursiveSync(full, destSub);
+
+          // Mirror into targetPreviewDir/images if not images already
+          if (lower !== 'images') {
+            const destImages = path.join(targetPreviewDir, 'images');
+            copyRecursiveSync(full, destImages);
+          }
+        } else {
+          copyAssetDirsRecursive(full, depth + 1);
         }
       }
-    }
-  }
+    } catch (e) {}
+  };
+
+  copyAssetDirsRecursive(sourceDir);
+
+  // 2. Also find ALL loose images anywhere in sourceDir and copy them directly to targetPreviewDir/images and targetPreviewDir/
+  const targetImagesDir = path.join(targetPreviewDir, 'images');
+  fs.mkdirSync(targetImagesDir, { recursive: true });
+
+  const copyLooseImages = (dir, depth = 0) => {
+    if (depth > 5) return;
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (['node_modules', '.git', '_temp_clone'].includes(ent.name)) continue;
+        const full = path.join(dir, ent.name);
+        if (ent.isFile()) {
+          const ext = path.extname(ent.name).toLowerCase();
+          if (imageExts.includes(ext)) {
+            // Copy to targetPreviewDir/images/<filename>
+            const destInImages = path.join(targetImagesDir, ent.name);
+            if (!fs.existsSync(destInImages)) {
+              try { fs.copyFileSync(full, destInImages); } catch (e) {}
+            }
+            // Copy to targetPreviewDir/<filename> (root level)
+            const destInRoot = path.join(targetPreviewDir, ent.name);
+            if (!fs.existsSync(destInRoot)) {
+              try { fs.copyFileSync(full, destInRoot); } catch (e) {}
+            }
+          }
+        } else if (ent.isDirectory()) {
+          copyLooseImages(full, depth + 1);
+        }
+      }
+    } catch (e) {}
+  };
+
+  copyLooseImages(sourceDir);
 };
 
 /**
@@ -202,15 +232,17 @@ export const injectBaseTag = (htmlPath, baseHref) => {
     const baseHrefClean = (baseHref || '').startsWith('/') ? baseHref : `/previews/${baseHref}/`;
     const normalizedBaseHref = baseHrefClean.endsWith('/') ? baseHrefClean : `${baseHrefClean}/`;
     const baseTag = `<base href="${normalizedBaseHref}">`;
+    const metaReferrer = `<meta name="referrer" content="unsafe-url">`;
 
-    if (!html.includes('<base')) {
-      if (html.includes('<head>')) {
-        html = html.replace('<head>', `<head>\n  ${baseTag}`);
-      } else if (html.includes('<HEAD>')) {
-        html = html.replace('<HEAD>', `<HEAD>\n  ${baseTag}`);
-      } else {
-        html = `${baseTag}\n${html}`;
-      }
+    // Replace existing <base> tag or inject into head
+    if (/<base\s+[^>]*>/i.test(html)) {
+      html = html.replace(/<base\s+[^>]*>/i, baseTag);
+    } else if (/<head>/i.test(html)) {
+      html = html.replace(/<head>/i, `<head>\n  ${baseTag}\n  ${metaReferrer}`);
+    } else if (/<HEAD>/i.test(html)) {
+      html = html.replace(/<HEAD>/i, `<HEAD>\n  ${baseTag}\n  ${metaReferrer}`);
+    } else {
+      html = `${baseTag}\n${metaReferrer}\n${html}`;
     }
 
     // 1. Rewrite root-relative asset directories (/images/..., /img/..., /assets/...) to relative ./
@@ -221,7 +253,7 @@ export const injectBaseTag = (htmlPath, baseHref) => {
 
     // 2. Rewrite root-relative file extensions like src="/deal.png" or href="/style.css"
     html = html.replace(
-      /(href|src|data-src|poster)=["']\/([^"' >/]+\.(?:png|jpg|jpeg|gif|svg|webp|ico|bmp|avif|css|js|mjs|woff2?|ttf|eot|mp4|webm))["']/gi,
+      /(href|src|data-src|poster)=["']\/([^"' >/]+\.(?:png|jpg|jpeg|jfif|pjpeg|pjp|gif|svg|webp|ico|bmp|avif|tiff|tif|css|js|mjs|woff2?|ttf|eot|mp4|webm))["']/gi,
       '$1="./$2"'
     );
 
@@ -231,7 +263,7 @@ export const injectBaseTag = (htmlPath, baseHref) => {
       'url("./$1/$2")'
     );
     html = html.replace(
-      /url\(\s*["']?\/([^"')>/]+\.(?:png|jpg|jpeg|gif|svg|webp|ico|bmp|avif))["']?\s*\)/gi,
+      /url\(\s*["']?\/([^"')>/]+\.(?:png|jpg|jpeg|jfif|pjpeg|pjp|gif|svg|webp|ico|bmp|avif|tiff|tif))["']?\s*\)/gi,
       'url("./$1")'
     );
 

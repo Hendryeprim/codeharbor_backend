@@ -1,12 +1,18 @@
 import app from './app.js';
 import { config } from './config/index.js';
 import prisma from './database/prisma.js';
+import { seedCurriculumDatabase } from './scripts/seed-curriculum.js';
 
 const startServer = async () => {
   try {
     // Verify database connection
     await prisma.$connect();
     console.log('✓ Successfully connected to PostgreSQL database (coderharbor_db)');
+
+    // Automatically ensure curriculum tracks (Python, Java, SQL, Data Analysis, Software Testing) are seeded
+    seedCurriculumDatabase().catch((seedErr) => {
+      console.warn('[Curriculum Auto-Seed] Notice:', seedErr.message);
+    });
 
     const server = app.listen(config.port, () => {
       console.log(`===============================================`);

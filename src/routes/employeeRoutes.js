@@ -18,6 +18,13 @@ import {
   deleteMyProject,
   deleteMySubmission,
 } from '../controllers/employeePortalController.js';
+import {
+  getMyAssignedSkills,
+  getMySkillLevelTasks,
+  getMyTaskDetails,
+  runTaskCode,
+  submitTask,
+} from '../controllers/skillTaskController.js';
 import { authenticate, requireEmployee } from '../middleware/auth.js';
 import { uploadProjectArchive } from '../middleware/upload.js';
 
@@ -55,5 +62,12 @@ router.patch('/notifications/:id/read', markMyNotificationRead);
 // Profile (Primary skill is read-only)
 router.get('/profile', getMyProfile);
 router.patch('/profile', updateMyProfile);
+
+// ─── SKILL-BASED CURRICULUM & TASKS (EMPLOYEE-SPECIFIC) ──────────────────────
+router.get('/curriculum/skills', getMyAssignedSkills);
+router.get('/curriculum/skills/:skillSlug/tasks', getMySkillLevelTasks);
+router.get('/curriculum/tasks/:taskId', getMyTaskDetails);
+router.post('/curriculum/tasks/:taskId/run', runTaskCode);
+router.post('/curriculum/tasks/:taskId/submit', submitTask);
 
 export default router;

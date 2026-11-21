@@ -94,6 +94,7 @@ model User {
   employeeProfile EmployeeProfile?
   notifications   Notification[]
   auditLogs       AuditLog[]
+  reviewedSubmissions SkillTaskSubmission[] @relation("SubmissionReviewer")
 
   @@map("users")
 }
@@ -311,6 +312,9 @@ model EmployeeProfile {
   skills       EmployeeSkill[]
   assignments  ProjectAssignment[]
   tasks        ProjectTask[]
+  skillTracks      EmployeeSkillTrack[]
+  skillProgress    EmployeeSkillProgress[]
+  taskSubmissions  SkillTaskSubmission[]
 
   @@map("employee_profiles")
 }
@@ -544,5 +548,126 @@ model AuditLog {
   user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@map("audit_logs")
+}
+
+// ─── SKILL-BASED TASK & CURRICULUM MANAGEMENT SYSTEM ─────────────────────────
+
+enum TaskLevel {
+  BASIC
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum TaskDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum TaskStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SubmissionStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
+model Skill {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?  @db.Text
+  icon        String?
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tasks          SkillTask[]
+  employeeTracks EmployeeSkillTrack[]
+  progress       EmployeeSkillProgress[]
+
+  @@map("curriculum_skills")
+}
+
+model EmployeeSkillTrack {
+  id                String          @id @default(uuid())
+  employeeProfileId String
+  skillId           String
+  assignedAt        DateTime        @default(now())
+
+  employeeProfile   EmployeeProfile @relation(fields: [employeeProfileId], references: [id], onDelete: Cascade)
+  skill             Skill           @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeProfileId, skillId])
+  @@map("employee_skill_tracks")
+}
+
+model EmployeeSkillProgress {
+  id                     String          @id @default(uuid())
+  employeeProfileId      String
+  skillId                String
+  unlockedLevel          TaskLevel       @default(BASIC)
+  basicCompleted         Boolean         @default(false)
+  intermediateCompleted  Boolean         @default(false)
+  advancedCompleted      Boolean         @default(false)
+  completedAt            DateTime?
+  updatedAt              DateTime        @updatedAt
+
+  employeeProfile        EmployeeProfile @relation(fields: [employeeProfileId], references: [id], onDelete: Cascade)
+  skill                  Skill           @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeProfileId, skillId])
+  @@map("employee_skill_progress")
+}
+
+model SkillTask {
+  id             String          @id @default(uuid())
+  skillId        String
+  level          TaskLevel       @default(BASIC)
+  title          String
+  description    String          @db.Text
+  instructions   String          @db.Text
+  expectedOutput String?         @db.Text
+  difficulty     TaskDifficulty  @default(EASY)
+  githubRepoUrl  String?
+  githubBranch   String?         @default("main")
+  status         TaskStatus      @default(ACTIVE)
+  initialCode    String?         @db.Text
+  isRequired     Boolean         @default(true)
+  orderIndex     Int             @default(1)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  skill          Skill           @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  submissions    SkillTaskSubmission[]
+
+  @@map("skill_tasks")
+}
+
+model SkillTaskSubmission {
+  id                String           @id @default(uuid())
+  taskId            String
+  employeeProfileId String
+  submittedCode     String?          @db.Text
+  projectFiles      Json?
+  githubRepoUrl     String?
+  executionOutput   String?          @db.Text
+  executionError    String?          @db.Text
+  executionTimeMs   Int?
+  status            SubmissionStatus @default(PENDING_REVIEW)
+  adminComment      String?          @db.Text
+  reviewedById      String?
+  reviewedAt        DateTime?
+  submittedAt       DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  task              SkillTask        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  employeeProfile   EmployeeProfile  @relation(fields: [employeeProfileId], references: [id], onDelete: Cascade)
+  reviewer          User?            @relation("SubmissionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@map("skill_task_submissions")
 }
 

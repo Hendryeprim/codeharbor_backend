@@ -83,12 +83,17 @@ const MIME_TYPES = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
+  '.jfif': 'image/jpeg',
+  '.pjpeg': 'image/jpeg',
+  '.pjp': 'image/jpeg',
   '.gif': 'image/gif',
   '.svg': 'image/svg+xml',
   '.webp': 'image/webp',
   '.ico': 'image/x-icon',
   '.bmp': 'image/bmp',
   '.avif': 'image/avif',
+  '.tiff': 'image/tiff',
+  '.tif': 'image/tiff',
   '.css': 'text/css',
   '.js': 'application/javascript',
   '.mjs': 'application/javascript',
@@ -104,52 +109,68 @@ const MIME_TYPES = {
   '.wav': 'audio/wav',
 };
 
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.jfif', '.pjpeg', '.pjp', '.gif', '.svg', '.webp', '.ico', '.bmp', '.avif', '.tiff', '.tif'];
+
 /**
  * Robust asset locator: Finds requested asset inside baseDir handling:
- * 1. Exact path
- * 2. Case-insensitive segment matching (crucial for Linux!)
- * 3. Standard asset subfolders (images/, img/, assets/, public/, media/, etc.)
- * 4. Recursive basename search as ultimate fallback
+ * 1. URL decoding (%20 -> space, etc.)
+ * 2. Exact path check
+ * 3. Case-insensitive segment matching (crucial for Linux!)
+ * 4. Standard asset subfolders (images/, img/, assets/, public/, media/, etc.)
+ * 5. Recursive deep search across directory tree
+ * 6. Fuzzy extension matching (e.g. project requests .png, disk has .jpg)
+ * 7. Fuzzy naming matching (e.g. spaces vs hyphens vs underscores)
  */
-const findFileInProject = (baseDir, reqSubpath) => {
+export const findFileInProject = (baseDir, reqSubpath) => {
   if (!baseDir || !fs.existsSync(baseDir)) return null;
 
-  const clean = (reqSubpath || '').replace(/^\/+/, '').split('?')[0];
-  if (!clean) return null;
+  let rawClean = (reqSubpath || '').replace(/^\/+/, '').split('?')[0];
+  if (!rawClean) return null;
+
+  let decodedClean = rawClean;
+  try {
+    decodedClean = decodeURIComponent(rawClean);
+  } catch (e) {}
+
+  const candidatesToTry = Array.from(new Set([decodedClean, rawClean])).filter(Boolean);
 
   // 1. Direct path check
-  const direct = path.join(baseDir, clean);
-  if (fs.existsSync(direct) && fs.statSync(direct).isFile()) {
-    return direct;
+  for (const c of candidatesToTry) {
+    const direct = path.join(baseDir, c);
+    if (fs.existsSync(direct) && fs.statSync(direct).isFile()) {
+      return direct;
+    }
   }
 
   // 2. Case-insensitive segment-by-segment check
-  const segments = clean.split(/[/\\]+/);
-  let curDir = baseDir;
-  let matchFailed = false;
+  for (const c of candidatesToTry) {
+    const segments = c.split(/[/\\]+/);
+    let curDir = baseDir;
+    let matchFailed = false;
 
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i].toLowerCase();
-    let entries = [];
-    try {
-      entries = fs.readdirSync(curDir, { withFileTypes: true });
-    } catch (e) {
-      matchFailed = true;
-      break;
-    }
-    const found = entries.find((e) => e.name.toLowerCase() === seg);
-    if (!found) {
-      matchFailed = true;
-      break;
-    }
-    curDir = path.join(curDir, found.name);
-    if (i === segments.length - 1 && found.isFile()) {
-      return curDir;
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i].toLowerCase();
+      let entries = [];
+      try {
+        entries = fs.readdirSync(curDir, { withFileTypes: true });
+      } catch (e) {
+        matchFailed = true;
+        break;
+      }
+      const found = entries.find((e) => e.name.toLowerCase() === seg);
+      if (!found) {
+        matchFailed = true;
+        break;
+      }
+      curDir = path.join(curDir, found.name);
+      if (i === segments.length - 1 && found.isFile()) {
+        return curDir;
+      }
     }
   }
 
-  // 3. Common asset folders search
-  const basename = path.basename(clean);
+  // 3. Common asset folders search (case-insensitive for each folder name)
+  const basename = path.basename(decodedClean);
   const commonFolders = [
     'images',
     'img',
@@ -167,6 +188,8 @@ const findFileInProject = (baseDir, reqSubpath) => {
     'static/img',
     'media',
     'photos',
+    'pic',
+    'pictures',
     'icons',
     'css',
     'js',
@@ -177,31 +200,58 @@ const findFileInProject = (baseDir, reqSubpath) => {
     if (fs.existsSync(cand) && fs.statSync(cand).isFile()) {
       return cand;
     }
-    const candSub = path.join(baseDir, folder, clean);
+    const candSub = path.join(baseDir, folder, decodedClean);
     if (fs.existsSync(candSub) && fs.statSync(candSub).isFile()) {
       return candSub;
     }
   }
 
-  // 4. Recursive basename fallback (case-insensitive) across project directories
+  // 4. Recursive deep search (case-insensitive + fuzzy matching)
   const targetLower = basename.toLowerCase();
+  const parsedTarget = path.parse(targetLower);
+  const targetNormalized = parsedTarget.name.replace(/[-_ \s]+/g, '').toLowerCase();
+  const isTargetImage = IMAGE_EXTENSIONS.includes(parsedTarget.ext);
+
   const searchRecursive = (dir, depth = 0) => {
-    if (depth > 5) return null;
+    if (depth > 6) return null;
     let entries = [];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch (e) {
       return null;
     }
+
+    // 4a. Exact filename match (case-insensitive)
     for (const ent of entries) {
-      if (['node_modules', '.git', '_temp_clone'].includes(ent.name)) continue;
-      const full = path.join(dir, ent.name);
-      if (ent.isFile()) {
-        if (ent.name.toLowerCase() === targetLower) {
-          return full;
+      if (ent.isFile() && ent.name.toLowerCase() === targetLower) {
+        return path.join(dir, ent.name);
+      }
+    }
+
+    // 4b. Fuzzy filename match for images
+    if (isTargetImage) {
+      for (const ent of entries) {
+        if (ent.isFile()) {
+          const entParsed = path.parse(ent.name.toLowerCase());
+          if (IMAGE_EXTENSIONS.includes(entParsed.ext)) {
+            // Match same name with different image extension (.jpg vs .png)
+            if (entParsed.name === parsedTarget.name) {
+              return path.join(dir, ent.name);
+            }
+            // Match normalized name (e.g. 'crazy-deals' vs 'crazy_deals' vs 'crazy deals')
+            const entNorm = entParsed.name.replace(/[-_ \s]+/g, '');
+            if (entNorm === targetNormalized && entNorm.length > 2) {
+              return path.join(dir, ent.name);
+            }
+          }
         }
-      } else if (ent.isDirectory()) {
-        const found = searchRecursive(full, depth + 1);
+      }
+    }
+
+    // 4c. Recurse into subdirectories
+    for (const ent of entries) {
+      if (ent.isDirectory() && !['node_modules', '.git', '_temp_clone'].includes(ent.name)) {
+        const found = searchRecursive(path.join(dir, ent.name), depth + 1);
         if (found) return found;
       }
     }
@@ -209,6 +259,44 @@ const findFileInProject = (baseDir, reqSubpath) => {
   };
 
   return searchRecursive(baseDir);
+};
+
+/**
+ * Dynamically resolves all candidate root and subdirectories for a project
+ */
+export const resolveCandidateDirs = (rawId, cleanId) => {
+  const dirs = [];
+  const baseDirs = [
+    path.join(PREVIEWS_DIR, `managed-${cleanId}`),
+    path.join(PREVIEWS_DIR, rawId),
+    path.join(EXECUTIONS_DIR, `managed-${cleanId}`),
+    path.join(EXECUTIONS_DIR, rawId),
+  ];
+
+  for (const bDir of baseDirs) {
+    if (fs.existsSync(bDir)) {
+      if (!dirs.includes(bDir)) dirs.push(bDir);
+      try {
+        const entries = fs.readdirSync(bDir, { withFileTypes: true });
+        for (const ent of entries) {
+          if (ent.isDirectory() && !['node_modules', '.git', '_temp_clone'].includes(ent.name)) {
+            const sub = path.join(bDir, ent.name);
+            if (!dirs.includes(sub)) dirs.push(sub);
+            try {
+              const subEntries = fs.readdirSync(sub, { withFileTypes: true });
+              for (const subEnt of subEntries) {
+                if (subEnt.isDirectory() && !['node_modules', '.git', '_temp_clone'].includes(subEnt.name)) {
+                  const subSub = path.join(sub, subEnt.name);
+                  if (!dirs.includes(subSub)) dirs.push(subSub);
+                }
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+    }
+  }
+  return dirs;
 };
 
 // ─── PREVIEW ASSET RESOLVER (FOR ABSOLUTE PATHS LIKE /assets/...) ─────────────
@@ -288,12 +376,7 @@ app.use((req, res, next) => {
     }
 
     // 2. Check static preview storage directories for this project
-    const possibleDirs = [
-      path.join(PREVIEWS_DIR, `managed-${cleanId}`),
-      path.join(PREVIEWS_DIR, rawId),
-      path.join(EXECUTIONS_DIR, `managed-${cleanId}`),
-      path.join(EXECUTIONS_DIR, rawId),
-    ];
+    const possibleDirs = resolveCandidateDirs(rawId, cleanId);
 
     for (const pDir of possibleDirs) {
       if (!fs.existsSync(pDir)) continue;
@@ -303,6 +386,8 @@ app.use((req, res, next) => {
         const mime = MIME_TYPES[fileExt] || 'application/octet-stream';
         res.setHeader('Content-Type', mime);
         res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Referrer-Policy', 'unsafe-url');
         res.removeHeader('X-Frame-Options');
         return res.sendFile(foundFile);
       }
@@ -328,6 +413,8 @@ const handlePreviewOrProxy = (req, res, next) => {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.setHeader('Content-Security-Policy', 'frame-ancestors *;');
+  res.setHeader('Referrer-Policy', 'unsafe-url');
+  res.setHeader('Access-Control-Allow-Origin', '*');
 
   // 1. Check if there is an active running process on an allocated port (dynamic dev server / Python / Vite)
   const active = activeExecutionsMap.get(cleanId) || activeExecutionsMap.get(rawId);
@@ -348,6 +435,7 @@ const handlePreviewOrProxy = (req, res, next) => {
       (proxyRes) => {
         const resHeaders = { ...proxyRes.headers };
         delete resHeaders['x-frame-options'];
+        resHeaders['access-control-allow-origin'] = '*';
         res.writeHead(proxyRes.statusCode, resHeaders);
         proxyRes.pipe(res, { end: true });
       }
@@ -364,12 +452,7 @@ const handlePreviewOrProxy = (req, res, next) => {
   }
 
   // 2. Check static preview storage directories for the built / HTML application
-  const candidateDirs = [
-    path.join(PREVIEWS_DIR, `managed-${cleanId}`),
-    path.join(PREVIEWS_DIR, rawId),
-    path.join(EXECUTIONS_DIR, `managed-${cleanId}`),
-    path.join(EXECUTIONS_DIR, rawId),
-  ];
+  const candidateDirs = resolveCandidateDirs(rawId, cleanId);
 
   // Force trailing slash for preview root so relative ./assets and scripts resolve correctly
   const baseRoute = req.originalUrl.split('?')[0];
@@ -383,9 +466,26 @@ const handlePreviewOrProxy = (req, res, next) => {
 
   const validDir = candidateDirs.find((d) => fs.existsSync(d));
   if (validDir) {
+    // 2a. First, check if the request is for an asset file (image, script, style, font)
+    const ext = path.extname(req.path).toLowerCase();
+    if (ext && ext !== '.html') {
+      for (const candDir of candidateDirs) {
+        const foundAsset = findFileInProject(candDir, req.path);
+        if (foundAsset) {
+          const mime = MIME_TYPES[ext] || 'application/octet-stream';
+          res.setHeader('Content-Type', mime);
+          res.setHeader('Cache-Control', 'public, max-age=3600');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Referrer-Policy', 'unsafe-url');
+          res.removeHeader('X-Frame-Options');
+          return res.sendFile(foundAsset);
+        }
+      }
+    }
+
+    // 2b. Attempt static serve through express.static
     return express.static(validDir)(req, res, () => {
-      const ext = path.extname(req.path).toLowerCase();
-      // If it's an asset (image, style, script, font) that express.static missed:
+      // If express.static didn't find the file, try all candidateDirs with findFileInProject
       if (ext && ext !== '.html') {
         for (const candDir of candidateDirs) {
           const foundAsset = findFileInProject(candDir, req.path);
@@ -393,6 +493,8 @@ const handlePreviewOrProxy = (req, res, next) => {
             const mime = MIME_TYPES[ext] || 'application/octet-stream';
             res.setHeader('Content-Type', mime);
             res.setHeader('Cache-Control', 'public, max-age=3600');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Referrer-Policy', 'unsafe-url');
             res.removeHeader('X-Frame-Options');
             return res.sendFile(foundAsset);
           }
@@ -402,6 +504,8 @@ const handlePreviewOrProxy = (req, res, next) => {
       // SPA Fallback: If not a direct asset file with extension, serve the employee project's exact index.html
       const indexPath = path.join(validDir, 'index.html');
       if (fs.existsSync(indexPath)) {
+        res.setHeader('Referrer-Policy', 'unsafe-url');
+        res.setHeader('Access-Control-Allow-Origin', '*');
         return res.sendFile(indexPath);
       }
       next();
