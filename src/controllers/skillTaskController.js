@@ -1,6 +1,12 @@
 import prisma from '../database/prisma.js';
 import { executeCodeSnippet, executeMultiFileProject, detectLanguageFromFilename } from '../services/codeExecutionService.js';
 import { fetchGithubRepoFiles, buildWorkspaceZipBuffer } from '../services/githubRepoService.js';
+import {
+  startInteractiveSession,
+  attachTerminalStream,
+  sendTerminalInput,
+  stopInteractiveSession,
+} from '../services/interactiveTerminalService.js';
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
@@ -424,6 +430,64 @@ export const runTaskCode = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+};
+
+/**
+ * Interactive terminal session endpoints (supports live stdin prompts like Python input())
+ */
+export const startTaskTerminal = async (req, res, next) => {
+  try {
+    const { taskId } = req.params;
+    const { code, projectFiles, entryFile } = req.body;
+
+    const task = await prisma.skillTask.findUnique({
+      where: { id: taskId },
+      include: { skill: true },
+    });
+    if (!task) {
+      return res.status(404).json({ success: false, message: 'Task not found.' });
+    }
+
+    const session = await startInteractiveSession({
+      userId: req.user.id,
+      skillSlug: task.skill.slug,
+      files: Array.isArray(projectFiles) ? projectFiles : [],
+      code: code || '',
+      entryFile: entryFile || 'main.py',
+    });
+
+    res.status(200).json({
+      success: true,
+      sessionId: session.sessionId,
+      detectedLanguage: session.detectedLanguage,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const streamTaskTerminal = (req, res) => {
+  const { sessionId } = req.params;
+  const attached = attachTerminalStream(sessionId, req.user.id, res);
+  if (!attached) {
+    res.status(404).json({ success: false, message: 'Terminal session not found or expired.' });
+  }
+};
+
+export const sendTaskTerminalInput = (req, res) => {
+  const { sessionId } = req.params;
+  const { input } = req.body;
+  const ok = sendTerminalInput(sessionId, req.user.id, input);
+  if (!ok) {
+    return res.status(400).json({ success: false, message: 'Process is not running or cannot accept input.' });
+  }
+  res.status(200).json({ success: true });
+};
+
+export const stopTaskTerminal = (req, res) => {
+  const { sessionId } = req.params;
+  stopInteractiveSession(sessionId, req.user.id);
+  res.status(200).json({ success: true });
 };
 
 /**
