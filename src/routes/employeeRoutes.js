@@ -22,6 +22,8 @@ import {
   getMyAssignedSkills,
   getMySkillLevelTasks,
   getMyTaskDetails,
+  getMyTaskRepoFiles,
+  downloadMyTaskWorkspaceZip,
   runTaskCode,
   submitTask,
 } from '../controllers/skillTaskController.js';
@@ -67,6 +69,9 @@ router.patch('/profile', updateMyProfile);
 router.get('/curriculum/skills', getMyAssignedSkills);
 router.get('/curriculum/skills/:skillSlug/tasks', getMySkillLevelTasks);
 router.get('/curriculum/tasks/:taskId', getMyTaskDetails);
+router.get('/curriculum/tasks/:taskId/repo-files', getMyTaskRepoFiles);
+router.get('/curriculum/tasks/:taskId/download-zip', downloadMyTaskWorkspaceZip);
+router.post('/curriculum/tasks/:taskId/download-zip', downloadMyTaskWorkspaceZip);
 router.post('/curriculum/tasks/:taskId/run', runTaskCode);
 router.post('/curriculum/tasks/:taskId/submit', submitTask);
 

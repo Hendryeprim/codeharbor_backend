@@ -1,5 +1,6 @@
 import prisma from '../database/prisma.js';
 import { executeCodeSnippet, executeMultiFileProject } from '../services/codeExecutionService.js';
+import { fetchGithubRepoFiles, buildWorkspaceZipBuffer } from '../services/githubRepoService.js';
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
@@ -287,6 +288,89 @@ export const getMyTaskDetails = async (req, res, next) => {
         mySubmission: task.submissions[0] || null,
       },
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Fetch repository folder & files for a task's GitHub URL
+ */
+export const getMyTaskRepoFiles = async (req, res, next) => {
+  try {
+    const { taskId } = req.params;
+    const task = await prisma.skillTask.findUnique({
+      where: { id: taskId },
+      select: { id: true, title: true, githubRepoUrl: true, githubBranch: true },
+    });
+
+    if (!task) {
+      return res.status(404).json({ success: false, message: 'Task not found.' });
+    }
+
+    if (!task.githubRepoUrl) {
+      return res.status(200).json({
+        success: true,
+        repo: null,
+        files: [],
+      });
+    }
+
+    const repoData = await fetchGithubRepoFiles(task.githubRepoUrl, task.githubBranch || 'main');
+    res.status(200).json({
+      success: true,
+      repo: {
+        owner: repoData.owner,
+        repo: repoData.repo,
+        branch: repoData.branch,
+      },
+      files: repoData.files,
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to load repository files.',
+    });
+  }
+};
+
+/**
+ * Download full task/project folder as a .zip archive
+ */
+export const downloadMyTaskWorkspaceZip = async (req, res, next) => {
+  try {
+    const { taskId } = req.params;
+    const task = await prisma.skillTask.findUnique({
+      where: { id: taskId },
+      include: { skill: true },
+    });
+
+    if (!task) {
+      return res.status(404).json({ success: false, message: 'Task not found.' });
+    }
+
+    let filesToZip = Array.isArray(req.body?.files) && req.body.files.length > 0 ? req.body.files : null;
+
+    if (!filesToZip && task.githubRepoUrl) {
+      const repoData = await fetchGithubRepoFiles(task.githubRepoUrl, task.githubBranch || 'main');
+      filesToZip = repoData.files;
+    }
+
+    if (!filesToZip || filesToZip.length === 0) {
+      const ext = task.skill?.slug === 'sql' ? 'sql' : task.skill?.slug === 'java' ? 'java' : 'py';
+      filesToZip = [{ filename: `solution.${ext}`, content: task.initialCode || '' }];
+    }
+
+    const zipBuffer = buildWorkspaceZipBuffer(filesToZip);
+    const safeName = (task.title || 'project')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'project';
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.zip"`);
+    res.setHeader('Content-Length', zipBuffer.length);
+    return res.send(zipBuffer);
   } catch (error) {
     next(error);
   }
