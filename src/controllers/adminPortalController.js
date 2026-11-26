@@ -336,6 +336,49 @@ export const createEmployee = async (req, res, next) => {
       },
     });
 
+    // Automatically link the assigned primarySkill to EmployeeSkillTrack & EmployeeSkillProgress
+    try {
+      const matchedSkill = await prisma.skill.findFirst({
+        where: {
+          OR: [
+            { name: { equals: primarySkill.trim(), mode: 'insensitive' } },
+            { slug: primarySkill.trim().toLowerCase().replace(/\s+/g, '-') },
+          ],
+        },
+      });
+      if (matchedSkill && user.employeeProfile) {
+        await prisma.employeeSkillTrack.upsert({
+          where: {
+            employeeProfileId_skillId: {
+              employeeProfileId: user.employeeProfile.id,
+              skillId: matchedSkill.id,
+            },
+          },
+          update: {},
+          create: {
+            employeeProfileId: user.employeeProfile.id,
+            skillId: matchedSkill.id,
+          },
+        });
+        await prisma.employeeSkillProgress.upsert({
+          where: {
+            employeeProfileId_skillId: {
+              employeeProfileId: user.employeeProfile.id,
+              skillId: matchedSkill.id,
+            },
+          },
+          update: {},
+          create: {
+            employeeProfileId: user.employeeProfile.id,
+            skillId: matchedSkill.id,
+            unlockedLevel: 'BASIC',
+          },
+        });
+      }
+    } catch (syncErr) {
+      console.warn('Primary skill track auto-link warning:', syncErr.message);
+    }
+
     await createAuditLog({
       userId: req.user.id,
       action: 'EMPLOYEE_CREATED',
