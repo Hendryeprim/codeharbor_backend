@@ -1,5 +1,5 @@
 import prisma from '../database/prisma.js';
-import { executeCodeSnippet, executeMultiFileProject } from '../services/codeExecutionService.js';
+import { executeCodeSnippet, executeMultiFileProject, detectLanguageFromFilename } from '../services/codeExecutionService.js';
 import { fetchGithubRepoFiles, buildWorkspaceZipBuffer } from '../services/githubRepoService.js';
 
 /**
@@ -394,16 +394,20 @@ export const runTaskCode = async (req, res, next) => {
     }
 
     let result;
+    const targetLang = entryFile
+      ? detectLanguageFromFilename(entryFile, task.skill.slug)
+      : task.skill.slug;
+
     if (Array.isArray(projectFiles) && projectFiles.length > 0) {
       result = await executeMultiFileProject({
-        skillSlug: task.skill.slug,
+        skillSlug: targetLang,
         files: projectFiles,
         entryFile: entryFile || 'main.py',
         timeoutMs: 12000,
       });
     } else {
       result = await executeCodeSnippet({
-        language: task.skill.slug,
+        language: targetLang,
         code: code || '',
         timeoutMs: 10000,
       });
@@ -415,6 +419,7 @@ export const runTaskCode = async (req, res, next) => {
       stderr: result.stderr,
       executionTimeMs: result.executionTimeMs,
       exitCode: result.exitCode,
+      detectedLanguage: result.detectedLanguage || targetLang,
     });
   } catch (error) {
     next(error);

@@ -192,6 +192,26 @@ const runIsolatedProcess = ({ command, args = [], cwd, timeoutMs = 8000, input =
   });
 };
 
+const getPythonCommand = async () => {
+  if (os.platform() !== 'win32') {
+    if (await isCommandAvailable('python3')) return 'python3';
+    if (await isCommandAvailable('python')) return 'python';
+    return 'python3';
+  }
+  if (await isCommandAvailable('python')) return 'python';
+  if (await isCommandAvailable('python3')) return 'python3';
+  return 'python';
+};
+
+export const detectLanguageFromFilename = (filename = '', fallback = 'python') => {
+  const lower = String(filename || '').toLowerCase().trim();
+  if (lower.endsWith('.py')) return 'python';
+  if (lower.endsWith('.js') || lower.endsWith('.mjs') || lower.endsWith('.cjs')) return 'javascript';
+  if (lower.endsWith('.java')) return 'java';
+  if (lower.endsWith('.sql')) return 'sql';
+  return (fallback || 'python').toLowerCase().trim();
+};
+
 /**
  * Main Code Execution API for Employee and Admin Runners
  */
@@ -202,7 +222,8 @@ export const executeCodeSnippet = async ({ language = 'python', code = '', timeo
 
   // 1. SQL Execution
   if (normLang === 'sql') {
-    return await executeSql(code, timeoutMs);
+    const sqlRes = await executeSql(code, timeoutMs);
+    return { ...sqlRes, detectedLanguage: 'SQL' };
   }
 
   fs.mkdirSync(workDir, { recursive: true });
@@ -219,15 +240,17 @@ export const executeCodeSnippet = async ({ language = 'python', code = '', timeo
     ) {
       const scriptPath = path.join(workDir, 'solution.py');
       fs.writeFileSync(scriptPath, code, 'utf8');
+      const pyCmd = await getPythonCommand();
 
       const result = await runIsolatedProcess({
-        command: 'python solution.py',
+        command: `${pyCmd} solution.py`,
         cwd: workDir,
         timeoutMs,
       });
 
       return {
         ...result,
+        detectedLanguage: 'Python',
         stdout: result.stdout || (result.success ? 'Program executed successfully with no output.' : ''),
       };
     }
@@ -300,7 +323,7 @@ export const executeCodeSnippet = async ({ language = 'python', code = '', timeo
 };
 
 /**
- * Execute multi-file advanced projects
+ * Execute multi-file advanced projects with automatic language detection from entryFile
  */
 export const executeMultiFileProject = async ({
   skillSlug = 'python',
@@ -315,24 +338,80 @@ export const executeMultiFileProject = async ({
   try {
     for (const f of files) {
       if (!f.filename || typeof f.content !== 'string') continue;
-      const cleanPath = f.filename.replace(/^[\/\\]+/, '');
+      const cleanPath = f.filename.replace(/\\/g, '/').replace(/^[\/]+/, '');
+      if (cleanPath.includes('..')) continue;
       const fullPath = path.join(workDir, cleanPath);
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       fs.writeFileSync(fullPath, f.content, 'utf8');
     }
 
-    const normSlug = (skillSlug || '').toLowerCase();
-    let command = `python ${entryFile}`;
-
-    if (normSlug.includes('node') || normSlug.includes('js')) {
-      command = `node ${entryFile.endsWith('.js') ? entryFile : 'index.js'}`;
+    const safeEntry = String(entryFile || 'main.py').replace(/\\/g, '/').replace(/^[\/]+/, '');
+    if (safeEntry.includes('..')) {
+      return {
+        success: false,
+        stdout: '',
+        stderr: 'Invalid file path.',
+        executionTimeMs: 0,
+        exitCode: 1,
+        detectedLanguage: 'Unknown',
+      };
     }
 
-    return await runIsolatedProcess({
-      command,
+    const detected = detectLanguageFromFilename(safeEntry, skillSlug);
+
+    if (detected === 'sql') {
+      const target = files.find((f) => (f.filename || '').replace(/\\/g, '/') === safeEntry);
+      const res = await executeSql(target?.content || '', timeoutMs);
+      return { ...res, detectedLanguage: 'SQL' };
+    }
+
+    if (detected === 'java') {
+      const target = files.find((f) => (f.filename || '').replace(/\\/g, '/') === safeEntry);
+      const hasJava = await isCommandAvailable('javac');
+      if (!hasJava) {
+        const sim = simulateJavaExecution(target?.content || '');
+        return { ...sim, detectedLanguage: 'Java' };
+      }
+      const compileRes = await runIsolatedProcess({
+        command: `javac "${safeEntry}"`,
+        cwd: workDir,
+        timeoutMs: 8000,
+      });
+      if (!compileRes.success) {
+        return { ...compileRes, detectedLanguage: 'Java', stderr: `Java Compilation Error:\n${compileRes.stderr}` };
+      }
+      const entryDir = path.dirname(safeEntry);
+      const className = path.basename(safeEntry, '.java');
+      const cp = entryDir && entryDir !== '.' ? `-cp "${entryDir}"` : '';
+      const runRes = await runIsolatedProcess({
+        command: `java ${cp} ${className}`.trim(),
+        cwd: workDir,
+        timeoutMs,
+      });
+      return { ...runRes, detectedLanguage: 'Java' };
+    }
+
+    if (detected === 'javascript') {
+      const runRes = await runIsolatedProcess({
+        command: `node "${safeEntry}"`,
+        cwd: workDir,
+        timeoutMs,
+      });
+      return { ...runRes, detectedLanguage: 'JavaScript' };
+    }
+
+    // Default: Python
+    const pyCmd = await getPythonCommand();
+    const runRes = await runIsolatedProcess({
+      command: `${pyCmd} "${safeEntry}"`,
       cwd: workDir,
       timeoutMs,
     });
+    return {
+      ...runRes,
+      detectedLanguage: 'Python',
+      stdout: runRes.stdout || (runRes.success ? 'Program executed successfully with no output.' : ''),
+    };
   } finally {
     try {
       fs.rmSync(workDir, { recursive: true, force: true });
