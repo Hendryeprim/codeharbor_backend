@@ -7,6 +7,12 @@ import {
   sendTerminalInput,
   stopInteractiveSession,
 } from '../services/interactiveTerminalService.js';
+import {
+  getTaskWorkspaceDir,
+  syncWorkspaceFiles,
+  createVenv,
+  getWorkspaceDependencyStatus,
+} from '../services/pythonEnvService.js';
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
@@ -438,7 +444,7 @@ export const runTaskCode = async (req, res, next) => {
 export const startTaskTerminal = async (req, res, next) => {
   try {
     const { taskId } = req.params;
-    const { code, projectFiles, entryFile } = req.body;
+    const { code, projectFiles, entryFile, rawCommand } = req.body;
 
     const task = await prisma.skillTask.findUnique({
       where: { id: taskId },
@@ -450,19 +456,62 @@ export const startTaskTerminal = async (req, res, next) => {
 
     const session = await startInteractiveSession({
       userId: req.user.id,
+      taskId,
       skillSlug: task.skill.slug,
       files: Array.isArray(projectFiles) ? projectFiles : [],
       code: code || '',
       entryFile: entryFile || 'main.py',
+      rawCommand: rawCommand || '',
     });
 
     res.status(200).json({
       success: true,
       sessionId: session.sessionId,
       detectedLanguage: session.detectedLanguage,
+      cwd: session.cwd,
+      venv: session.venv,
     });
   } catch (error) {
     next(error);
+  }
+};
+
+export const getTaskEnvironmentStatus = async (req, res, next) => {
+  try {
+    const { taskId } = req.params;
+    const { projectFiles } = req.body || {};
+
+    const workspaceDir = getTaskWorkspaceDir(req.user.id, taskId);
+    if (Array.isArray(projectFiles) && projectFiles.length > 0) {
+      syncWorkspaceFiles(workspaceDir, projectFiles);
+    }
+
+    const status = await getWorkspaceDependencyStatus(workspaceDir);
+    res.status(200).json({ success: true, ...status });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message || 'Failed to inspect Python environment.' });
+  }
+};
+
+export const createTaskVenv = async (req, res, next) => {
+  try {
+    const { taskId } = req.params;
+    const { venvName = 'venv', projectFiles } = req.body || {};
+
+    const workspaceDir = getTaskWorkspaceDir(req.user.id, taskId);
+    if (Array.isArray(projectFiles) && projectFiles.length > 0) {
+      syncWorkspaceFiles(workspaceDir, projectFiles);
+    }
+
+    const created = await createVenv(workspaceDir, venvName);
+    const status = await getWorkspaceDependencyStatus(workspaceDir);
+    res.status(200).json({
+      success: true,
+      message: created.message,
+      ...status,
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message || 'Failed to create virtual environment.' });
   }
 };
 

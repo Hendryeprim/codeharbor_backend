@@ -30,6 +30,8 @@ import {
   streamTaskTerminal,
   sendTaskTerminalInput,
   stopTaskTerminal,
+  getTaskEnvironmentStatus,
+  createTaskVenv,
 } from '../controllers/skillTaskController.js';
 import { authenticate, requireEmployee } from '../middleware/auth.js';
 import { uploadProjectArchive } from '../middleware/upload.js';
@@ -81,6 +83,8 @@ router.post('/curriculum/tasks/:taskId/terminal/start', startTaskTerminal);
 router.get('/curriculum/tasks/:taskId/terminal/:sessionId/stream', streamTaskTerminal);
 router.post('/curriculum/tasks/:taskId/terminal/:sessionId/input', sendTaskTerminalInput);
 router.post('/curriculum/tasks/:taskId/terminal/:sessionId/stop', stopTaskTerminal);
+router.post('/curriculum/tasks/:taskId/env/status', getTaskEnvironmentStatus);
+router.post('/curriculum/tasks/:taskId/env/create-venv', createTaskVenv);
 router.post('/curriculum/tasks/:taskId/submit', submitTask);
 
 export default router;
