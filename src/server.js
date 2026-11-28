@@ -1,6 +1,56 @@
+import { execSync } from 'node:child_process';
 import app from './app.js';
 import { config } from './config/index.js';
 import prisma from './database/prisma.js';
+
+const freePortIfOccupied = (port) => {
+  try {
+    if (process.platform === 'linux') {
+      try {
+        execSync(`fuser -k ${port}/tcp 2>/dev/null || true`);
+      } catch (_) {
+        try {
+          execSync(`lsof -ti:${port} | xargs -r kill -9 2>/dev/null || true`);
+        } catch (_) {}
+      }
+    } else if (process.platform === 'win32') {
+      try {
+        const output = execSync(`netstat -ano | findstr :${port}`).toString();
+        const lines = output.trim().split('\n');
+        for (const line of lines) {
+          const parts = line.trim().split(/\s+/);
+          const pid = parts[parts.length - 1];
+          if (pid && pid !== `${process.pid}` && pid !== '0') {
+            execSync(`taskkill /F /PID ${pid} 2>nul || exit 0`);
+          }
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+};
+
+const bindServerWithRetry = (port, retries = 2) => {
+  return new Promise((resolve, reject) => {
+    const attempt = (remaining) => {
+      const s = app.listen(port, () => {
+        resolve(s);
+      });
+
+      s.once('error', async (err) => {
+        if (err.code === 'EADDRINUSE' && remaining > 0) {
+          console.warn(`[PORT RECOVERY] Port ${port} is occupied by a stale process. Automatically releasing port and retrying...`);
+          freePortIfOccupied(port);
+          await new Promise((r) => setTimeout(r, 1500));
+          attempt(remaining - 1);
+        } else {
+          reject(err);
+        }
+      });
+    };
+
+    attempt(retries);
+  });
+};
 
 const startServer = async () => {
   try {
@@ -24,14 +74,14 @@ const startServer = async () => {
       }).catch(() => {});
     }
 
-    const server = app.listen(config.port, () => {
-      console.log(`===============================================`);
-      console.log(` CoderHarbor API Server running on port ${config.port}`);
-      console.log(` Mode: ${config.nodeEnv}`);
-      console.log(` Health Check: http://localhost:${config.port}/api/health`);
-      console.log(` Purchasing Pipeline: [ COMING SOON ]`);
-      console.log(`===============================================`);
-    });
+    const server = await bindServerWithRetry(config.port, 2);
+
+    console.log(`===============================================`);
+    console.log(` CoderHarbor API Server running on port ${config.port}`);
+    console.log(` Mode: ${config.nodeEnv}`);
+    console.log(` Health Check: http://localhost:${config.port}/api/health`);
+    console.log(` Purchasing Pipeline: [ COMING SOON ]`);
+    console.log(`===============================================`);
 
     const shutdown = async (signal) => {
       console.log(`\nReceived ${signal}. Gracefully closing server...`);
@@ -40,7 +90,7 @@ const startServer = async () => {
         try {
           await prisma.$disconnect();
           console.log('Database disconnected.');
-        } catch (e) {}
+        } catch (_) {}
         process.exit(0);
       });
       setTimeout(() => {
