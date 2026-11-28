@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 export const config = {
-  port: process.env.PORT || 5000,
+  port: process.env.PORT || 5050,
   databaseUrl: process.env.DATABASE_URL,
   jwtSecret: process.env.JWT_SECRET || 'coderharbor_default_secret_key_change_me',
   jwtExpiresIn: '7d',
