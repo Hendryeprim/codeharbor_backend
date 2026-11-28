@@ -32,6 +32,7 @@ import {
   getEmployeeById,
   updateEmployee,
   toggleEmployeeStatus,
+  deleteEmployee,
   getEmployeePerformance,
   getEmployeeSkills,
   getAllManagedProjects,
@@ -92,6 +93,7 @@ router.get('/employees/:id', getEmployeeById);
 router.patch('/employees/:id', updateEmployee);
 router.put('/employees/:id', updateEmployee);
 router.patch('/employees/:id/status', toggleEmployeeStatus);
+router.delete('/employees/:id', deleteEmployee);
 
 // Managed Projects Management
 router.get('/managed-projects', getAllManagedProjects);

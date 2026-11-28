@@ -608,6 +608,67 @@ export const toggleEmployeeStatus = async (req, res, next) => {
   }
 };
 
+export const deleteEmployee = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const profile = await prisma.employeeProfile.findFirst({
+      where: {
+        OR: [{ id }, { employeeId: id }],
+      },
+      include: {
+        user: true,
+      },
+    });
+
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Employee not found.' });
+    }
+
+    const employeeName = profile.user?.name || profile.employeeId;
+    const employeeIdStr = profile.employeeId;
+    const userId = profile.userId;
+
+    // 1. Remove any project submissions by this employee
+    await prisma.projectSubmission.deleteMany({
+      where: { employeeProfileId: profile.id },
+    }).catch(() => {});
+
+    // 2. Delete the employee profile (cascades to assignments, skillTracks, skillProgress, taskSubmissions)
+    await prisma.employeeProfile.delete({
+      where: { id: profile.id },
+    });
+
+    // 3. Delete the user account if role is EMPLOYEE
+    if (profile.user && profile.user.role === 'EMPLOYEE') {
+      await prisma.user.delete({
+        where: { id: userId },
+      }).catch(() => {});
+    }
+
+    // 4. Audit Log
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'EMPLOYEE_DELETED',
+      entity: 'EmployeeProfile',
+      entityId: profile.id,
+      details: {
+        employeeId: employeeIdStr,
+        name: employeeName,
+        deletedBy: req.user.name,
+      },
+      ipAddress: req.ip,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Employee "${employeeName}" (${employeeIdStr}) deleted successfully.`,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getEmployeePerformance = async (req, res, next) => {
   try {
     const profiles = await prisma.employeeProfile.findMany({
