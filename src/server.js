@@ -33,6 +33,25 @@ const startServer = async () => {
       console.log(`===============================================`);
     });
 
+    const shutdown = async (signal) => {
+      console.log(`\nReceived ${signal}. Gracefully closing server...`);
+      server.close(async () => {
+        console.log('HTTP server closed.');
+        try {
+          await prisma.$disconnect();
+          console.log('Database disconnected.');
+        } catch (e) {}
+        process.exit(0);
+      });
+      setTimeout(() => {
+        console.error('Force exiting after timeout.');
+        process.exit(0);
+      }, 3000).unref();
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
         console.error(`\n[PORT OCCUPIED] Port ${config.port} is already being used by an active process.`);
