@@ -338,10 +338,10 @@ export const createEmployee = async (req, res, next) => {
       },
     });
 
-    // Automatically link the assigned primarySkill to EmployeeSkillTrack & EmployeeSkillProgress
+    // Automatically link the assigned primarySkill to EmployeeSkillTrack & EmployeeSkillProgress & assign technical project
     try {
       if (user.employeeProfile) {
-        await syncEmployeePrimarySkillTrack(user.employeeProfile.id, primarySkill);
+        await syncEmployeePrimarySkillTrack(user.employeeProfile.id, primarySkill, req.user.id);
       }
     } catch (syncErr) {
       console.warn('Primary skill track auto-link warning:', syncErr.message);
@@ -545,7 +545,7 @@ export const updateEmployee = async (req, res, next) => {
 
     if (primarySkill && primarySkill !== profile.primarySkill) {
       try {
-        await syncEmployeePrimarySkillTrack(id, primarySkill);
+        await syncEmployeePrimarySkillTrack(id, primarySkill, req.user.id);
       } catch (syncErr) {
         console.warn('Primary skill track update sync warning:', syncErr.message);
       }

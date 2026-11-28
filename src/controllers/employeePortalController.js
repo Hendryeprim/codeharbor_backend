@@ -3,6 +3,7 @@ import { createAuditLog } from '../utils/auditLogger.js';
 import { analyzeProjectStructure, extractZipSafely } from '../services/isolatedExecutionService.js';
 import { generateManagedProjectPreview } from '../services/managedProjectPreviewService.js';
 import { runIsolatedProjectExecution } from '../services/isolatedExecutionWorker.js';
+import { autoAssignSkillProjectToEmployee, syncEmployeePrimarySkillTrack } from './skillTaskController.js';
 import path from 'path';
 import fs from 'fs';
 
@@ -31,7 +32,7 @@ export const getEmployeeDashboard = async (req, res, next) => {
       });
     }
 
-    const assignments = await prisma.projectAssignment.findMany({
+    let assignments = await prisma.projectAssignment.findMany({
       where: { employeeProfileId: profile.id },
       include: {
         project: {
@@ -55,6 +56,35 @@ export const getEmployeeDashboard = async (req, res, next) => {
       },
       orderBy: { assignedAt: 'desc' },
     });
+
+    // Self-healing: if employee has no assigned projects yet but has a primarySkill, automatically assign skill project
+    if (assignments.length === 0 && profile.primarySkill) {
+      await autoAssignSkillProjectToEmployee(profile.id, profile.primarySkill).catch(() => {});
+      assignments = await prisma.projectAssignment.findMany({
+        where: { employeeProfileId: profile.id },
+        include: {
+          project: {
+            include: {
+              submissions: {
+                include: {
+                  versions: {
+                    orderBy: { versionNumber: 'desc' },
+                    take: 1,
+                    include: {
+                      feedbacks: {
+                        orderBy: { createdAt: 'desc' },
+                        take: 1,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        orderBy: { assignedAt: 'desc' },
+      });
+    }
 
     const now = new Date();
     const assignedCount = assignments.filter((a) => a.project.status === 'ASSIGNED').length;
@@ -147,7 +177,7 @@ export const getMyProjects = async (req, res, next) => {
       else if (status === 'APPROVED') where.project = { status: 'APPROVED' };
     }
 
-    const assignments = await prisma.projectAssignment.findMany({
+    let assignments = await prisma.projectAssignment.findMany({
       where,
       include: {
         project: {
@@ -169,6 +199,33 @@ export const getMyProjects = async (req, res, next) => {
       },
       orderBy: { assignedAt: 'desc' },
     });
+
+    // Self-healing: if employee has no assigned projects yet but has a primarySkill, automatically assign skill project
+    if (assignments.length === 0 && profile.primarySkill) {
+      await autoAssignSkillProjectToEmployee(profile.id, profile.primarySkill).catch(() => {});
+      assignments = await prisma.projectAssignment.findMany({
+        where,
+        include: {
+          project: {
+            include: {
+              requirements: true,
+              submissions: {
+                include: {
+                  versions: {
+                    orderBy: { versionNumber: 'desc' },
+                    take: 1,
+                    include: {
+                      feedbacks: { orderBy: { createdAt: 'desc' }, take: 1 },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        orderBy: { assignedAt: 'desc' },
+      });
+    }
 
     const projects = assignments.map((a) => {
       const p = a.project;

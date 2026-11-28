@@ -21,52 +21,283 @@ import {
  */
 
 /**
- * Shared helper: automatically link an employee's primarySkill to EmployeeSkillTrack & EmployeeSkillProgress
+ * Skill Project Preset Templates based on primary skill
  */
-export const syncEmployeePrimarySkillTrack = async (employeeProfileId, primarySkillName) => {
+export const getSkillProjectTemplate = (skillNameOrSlug) => {
+  const s = (skillNameOrSlug || '').toLowerCase();
+  if (s.includes('data') || s.includes('analyst') || s.includes('analysis')) {
+    return {
+      skillName: 'Data Analysis',
+      skillSlug: 'data-analysis',
+      title: 'Data Analytics & Business Intelligence Dashboard',
+      description: 'End-to-end data analytics system: extract, clean, analyze datasets, execute SQL/Pandas aggregations, and generate interactive dashboards and forecasting reports.',
+      projectType: 'Real-Time Project',
+      framework: 'Pandas / NumPy / Python',
+      database: 'PostgreSQL',
+      frontend: 'Streamlit / React Analytics Dashboard',
+      difficulty: 'Medium',
+      priority: 'High',
+      objective: 'Ingest raw datasets, handle missing values, build predictive data pipelines, and present KPIs on interactive visualizations.',
+      technicalRequirements: 'Python 3.10+, Pandas, NumPy, Scikit-Learn, PostgreSQL database connection, automated data validation routines.',
+      requirements: [
+        'Data Cleaning & Automated Preprocessing Pipeline',
+        'Exploratory Data Analysis (EDA) & Statistical Correlation',
+        'Interactive KPIs & Visual Chart Dashboards',
+        'Automated Executive Reporting (PDF / Excel Export)',
+        'SQL Aggregations & Query Performance Tuning',
+      ],
+    };
+  }
+  if (s.includes('sql') || s.includes('database')) {
+    return {
+      skillName: 'SQL',
+      skillSlug: 'sql',
+      title: 'Enterprise Banking & Relational Database System',
+      description: 'Design and implement an ACID-compliant enterprise database management system with complex transactions, stored procedures, indexing, and auditing.',
+      projectType: 'Real-Time Project',
+      framework: 'SQL / PL-pgSQL',
+      database: 'PostgreSQL',
+      frontend: 'Admin Database Console',
+      difficulty: 'Medium',
+      priority: 'High',
+      objective: 'Construct 3NF schemas, manage ACID transactions, write optimized window functions and analytical queries, and enforce security policies.',
+      technicalRequirements: 'PostgreSQL 14+, PL/pgSQL stored procedures, triggers, B-Tree indexes, and performance query plans.',
+      requirements: [
+        '3NF Normalized Relational Schema & Constraints',
+        'Complex Joins, Window Functions & CTE Queries',
+        'ACID Stored Procedures, Triggers & Audit Logging',
+        'Index Optimization & Query Execution Tuning',
+        'Automated Backup, Recovery & Data Integrity Verification',
+      ],
+    };
+  }
+  if (s.includes('java') || s.includes('spring')) {
+    return {
+      skillName: 'Java',
+      skillSlug: 'java',
+      title: 'Java Enterprise Microservices & Spring Boot System',
+      description: 'Enterprise backend system using Java 17+, Spring Boot, JPA/Hibernate, secure JWT authentication, and resilient service architecture.',
+      projectType: 'Real-Time Project',
+      framework: 'Spring Boot',
+      database: 'PostgreSQL / MySQL',
+      frontend: 'React / Angular',
+      difficulty: 'Medium',
+      priority: 'High',
+      objective: 'Develop robust, scalable Java enterprise microservices with REST endpoints, transaction management, and automated unit tests.',
+      technicalRequirements: 'Java 17+, Spring Boot 3, Spring Security, Hibernate ORM, Maven/Gradle build system.',
+      requirements: [
+        'Spring Security JWT Authentication & Role-Based Access',
+        'RESTful Endpoints with DTO Validation & Exception Handling',
+        'JPA/Hibernate Database Layer & Transaction Boundaries',
+        'Unit & Integration Testing with JUnit 5 and Mockito',
+        'Dockerized Container Build & Production Readiness',
+      ],
+    };
+  }
+  if (s.includes('test') || s.includes('qa')) {
+    return {
+      skillName: 'Software Testing',
+      skillSlug: 'software-testing',
+      title: 'Automated QA Test Suite & Quality Assurance Pipeline',
+      description: 'Comprehensive software testing platform covering end-to-end UI automation, REST API regression tests, performance benchmarks, and defect reports.',
+      projectType: 'Real-Time Project',
+      framework: 'Selenium / PyTest / Playwright',
+      database: 'PostgreSQL',
+      frontend: 'Allure Test Report Dashboard',
+      difficulty: 'Medium',
+      priority: 'High',
+      objective: 'Build reliable automated test suites with high test coverage, mock assertions, and continuous integration reporting.',
+      technicalRequirements: 'PyTest / Selenium / Playwright, Postman/Newman for API tests, Allure report generation.',
+      requirements: [
+        'End-to-End Automated UI Test Cases & Page Object Model',
+        'REST API Endpoint Regression & Schema Validation Suite',
+        'Data-Driven & Parameterized Test Execution',
+        'Automated Defect & Test Run HTML Reporting',
+        'Performance & Boundary Condition Stress Testing',
+      ],
+    };
+  }
+  return {
+    skillName: 'Python',
+    skillSlug: 'python',
+    title: 'Python Enterprise Backend & REST API Platform',
+    description: 'High-performance Python backend service featuring async processing, ORM database operations, role-based authentication, and full test suite.',
+    projectType: 'Real-Time Project',
+    framework: 'Django / FastAPI',
+    database: 'PostgreSQL',
+    frontend: 'React',
+    difficulty: 'Medium',
+    priority: 'High',
+    objective: 'Build a production-ready Python backend web service with comprehensive endpoints, relational database persistence, and documentation.',
+    technicalRequirements: 'Python 3.10+, Django or FastAPI, PostgreSQL, Alembic/Django migrations, JWT authentication.',
+    requirements: [
+      'User Authentication & Secure Token Management',
+      'CRUD REST API Endpoints with Input Validation',
+      'Relational Database Modeling & ORM Migrations',
+      'Unit Tests & API Coverage with PyTest',
+      'Swagger / OpenAPI Interactive Documentation',
+    ],
+  };
+};
+
+/**
+ * Shared helper: automatically create & assign a Technical Project matching the employee's skill
+ */
+export const autoAssignSkillProjectToEmployee = async (employeeProfileId, skillName, adminUserId = null) => {
+  if (!employeeProfileId) return null;
+
+  const profile = await prisma.employeeProfile.findUnique({
+    where: { id: employeeProfileId },
+    include: {
+      assignments: {
+        include: { project: true },
+      },
+    },
+  });
+  if (!profile) return null;
+
+  const template = getSkillProjectTemplate(skillName || profile.primarySkill);
+
+  // Check if employee already has an assignment for this project title or skill
+  const existing = profile.assignments.find((a) =>
+    a.project && (
+      a.project.primarySkill?.toLowerCase() === template.skillName.toLowerCase() ||
+      a.project.title.toLowerCase() === template.title.toLowerCase()
+    )
+  );
+
+  if (existing) {
+    return existing.project;
+  }
+
+  // Create project
+  const project = await prisma.project.create({
+    data: {
+      title: template.title,
+      description: template.description,
+      projectType: template.projectType,
+      primarySkill: template.skillName,
+      framework: template.framework,
+      database: template.database,
+      frontend: template.frontend,
+      difficulty: template.difficulty,
+      priority: template.priority,
+      startDate: new Date(),
+      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+      objective: template.objective,
+      technicalRequirements: template.technicalRequirements,
+      submissionRequirements: ['Source Code', 'README', 'Database / SQL', 'Screenshots', 'GitHub URL', 'Documentation'],
+      status: 'ASSIGNED',
+      progress: 0,
+      createdById: adminUserId,
+    },
+  });
+
+  // Assign to employee
+  await prisma.projectAssignment.create({
+    data: {
+      projectId: project.id,
+      employeeProfileId: profile.id,
+      status: 'ASSIGNED',
+      assignedAt: new Date(),
+    },
+  });
+
+  // Requirements
+  for (const reqTitle of template.requirements) {
+    await prisma.projectRequirement.create({
+      data: {
+        projectId: project.id,
+        title: reqTitle,
+      },
+    }).catch(() => {});
+  }
+
+  // Notify employee
+  await prisma.notification.create({
+    data: {
+      userId: profile.userId,
+      title: 'Technical Project Assigned',
+      message: `You have been automatically assigned project "${project.title}" for your skill: ${template.skillName}.`,
+      type: 'PROJECT_ASSIGNED',
+      link: `/employee/projects/${project.id}`,
+    },
+  }).catch(() => {});
+
+  return project;
+};
+
+/**
+ * Shared helper: automatically link an employee's primarySkill to EmployeeSkillTrack & EmployeeSkillProgress & Project
+ */
+export const syncEmployeePrimarySkillTrack = async (employeeProfileId, primarySkillName, adminUserId = null) => {
   if (!employeeProfileId || !primarySkillName || typeof primarySkillName !== 'string') return null;
   const trimmed = primarySkillName.trim();
   if (!trimmed) return null;
 
+  // Smart matching with aliases
+  const normalized = trimmed.toLowerCase();
+  let targetSlug = normalized.replace(/\s+/g, '-');
+  if (normalized.includes('data') || normalized.includes('analyst') || normalized.includes('analysis')) {
+    targetSlug = 'data-analysis';
+  } else if (normalized.includes('test') || normalized.includes('qa')) {
+    targetSlug = 'software-testing';
+  } else if (normalized.includes('python') || normalized.includes('django')) {
+    targetSlug = 'python';
+  } else if (normalized.includes('java') || normalized.includes('spring')) {
+    targetSlug = 'java';
+  } else if (normalized.includes('sql') || normalized.includes('database')) {
+    targetSlug = 'sql';
+  }
+
   const matchedSkill = await prisma.skill.findFirst({
     where: {
       OR: [
+        { slug: targetSlug },
         { name: { equals: trimmed, mode: 'insensitive' } },
         { slug: trimmed.toLowerCase().replace(/\s+/g, '-') },
+        { name: { contains: trimmed, mode: 'insensitive' } },
       ],
     },
   });
 
-  if (!matchedSkill) return null;
-
-  await prisma.employeeSkillTrack.upsert({
-    where: {
-      employeeProfileId_skillId: {
+  if (matchedSkill) {
+    await prisma.employeeSkillTrack.upsert({
+      where: {
+        employeeProfileId_skillId: {
+          employeeProfileId,
+          skillId: matchedSkill.id,
+        },
+      },
+      update: {},
+      create: {
         employeeProfileId,
         skillId: matchedSkill.id,
       },
-    },
-    update: {},
-    create: {
-      employeeProfileId,
-      skillId: matchedSkill.id,
-    },
-  });
+    });
 
-  await prisma.employeeSkillProgress.upsert({
-    where: {
-      employeeProfileId_skillId: {
+    await prisma.employeeSkillProgress.upsert({
+      where: {
+        employeeProfileId_skillId: {
+          employeeProfileId,
+          skillId: matchedSkill.id,
+        },
+      },
+      update: {},
+      create: {
         employeeProfileId,
         skillId: matchedSkill.id,
+        unlockedLevel: 'BASIC',
       },
-    },
-    update: {},
-    create: {
-      employeeProfileId,
-      skillId: matchedSkill.id,
-      unlockedLevel: 'BASIC',
-    },
-  });
+    });
+  }
+
+  // Also auto-assign Technical Project for this employee
+  try {
+    await autoAssignSkillProjectToEmployee(employeeProfileId, trimmed, adminUserId);
+  } catch (err) {
+    console.warn('Auto-assign skill project warning:', err.message);
+  }
 
   return matchedSkill;
 };
