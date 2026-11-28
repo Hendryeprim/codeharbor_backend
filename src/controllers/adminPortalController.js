@@ -5,6 +5,7 @@ import { createAuditLog } from '../utils/auditLogger.js';
 import { runIsolatedExecution } from '../services/isolatedExecutionService.js';
 import { generateManagedProjectPreview } from '../services/managedProjectPreviewService.js';
 import { runIsolatedProjectExecution } from '../services/isolatedExecutionWorker.js';
+import { syncEmployeePrimarySkillTrack } from './skillTaskController.js';
 
 // ==========================================
 // 1. DASHBOARD & STATS
@@ -339,42 +340,8 @@ export const createEmployee = async (req, res, next) => {
 
     // Automatically link the assigned primarySkill to EmployeeSkillTrack & EmployeeSkillProgress
     try {
-      const matchedSkill = await prisma.skill.findFirst({
-        where: {
-          OR: [
-            { name: { equals: primarySkill.trim(), mode: 'insensitive' } },
-            { slug: primarySkill.trim().toLowerCase().replace(/\s+/g, '-') },
-          ],
-        },
-      });
-      if (matchedSkill && user.employeeProfile) {
-        await prisma.employeeSkillTrack.upsert({
-          where: {
-            employeeProfileId_skillId: {
-              employeeProfileId: user.employeeProfile.id,
-              skillId: matchedSkill.id,
-            },
-          },
-          update: {},
-          create: {
-            employeeProfileId: user.employeeProfile.id,
-            skillId: matchedSkill.id,
-          },
-        });
-        await prisma.employeeSkillProgress.upsert({
-          where: {
-            employeeProfileId_skillId: {
-              employeeProfileId: user.employeeProfile.id,
-              skillId: matchedSkill.id,
-            },
-          },
-          update: {},
-          create: {
-            employeeProfileId: user.employeeProfile.id,
-            skillId: matchedSkill.id,
-            unlockedLevel: 'BASIC',
-          },
-        });
+      if (user.employeeProfile) {
+        await syncEmployeePrimarySkillTrack(user.employeeProfile.id, primarySkill);
       }
     } catch (syncErr) {
       console.warn('Primary skill track auto-link warning:', syncErr.message);
@@ -577,6 +544,11 @@ export const updateEmployee = async (req, res, next) => {
     });
 
     if (primarySkill && primarySkill !== profile.primarySkill) {
+      try {
+        await syncEmployeePrimarySkillTrack(id, primarySkill);
+      } catch (syncErr) {
+        console.warn('Primary skill track update sync warning:', syncErr.message);
+      }
       await createAuditLog({
         userId: req.user.id,
         action: 'SKILL_ASSIGNED',
@@ -901,7 +873,7 @@ export const createManagedProject = async (req, res, next) => {
       },
     });
 
-    // 3. Create Project Assignment
+    // 3. Create Project Assignment & ensure primarySkill track is synced
     await prisma.projectAssignment.create({
       data: {
         projectId: project.id,
@@ -910,6 +882,7 @@ export const createManagedProject = async (req, res, next) => {
         assignedAt: new Date(),
       },
     });
+    await syncEmployeePrimarySkillTrack(employeeProfile.id, primarySkill).catch(() => {});
 
     // 4. Create Project Requirements
     if (requirements && Array.isArray(requirements) && requirements.length > 0) {

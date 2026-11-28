@@ -21,11 +21,62 @@ import {
  */
 
 /**
+ * Shared helper: automatically link an employee's primarySkill to EmployeeSkillTrack & EmployeeSkillProgress
+ */
+export const syncEmployeePrimarySkillTrack = async (employeeProfileId, primarySkillName) => {
+  if (!employeeProfileId || !primarySkillName || typeof primarySkillName !== 'string') return null;
+  const trimmed = primarySkillName.trim();
+  if (!trimmed) return null;
+
+  const matchedSkill = await prisma.skill.findFirst({
+    where: {
+      OR: [
+        { name: { equals: trimmed, mode: 'insensitive' } },
+        { slug: trimmed.toLowerCase().replace(/\s+/g, '-') },
+      ],
+    },
+  });
+
+  if (!matchedSkill) return null;
+
+  await prisma.employeeSkillTrack.upsert({
+    where: {
+      employeeProfileId_skillId: {
+        employeeProfileId,
+        skillId: matchedSkill.id,
+      },
+    },
+    update: {},
+    create: {
+      employeeProfileId,
+      skillId: matchedSkill.id,
+    },
+  });
+
+  await prisma.employeeSkillProgress.upsert({
+    where: {
+      employeeProfileId_skillId: {
+        employeeProfileId,
+        skillId: matchedSkill.id,
+      },
+    },
+    update: {},
+    create: {
+      employeeProfileId,
+      skillId: matchedSkill.id,
+      unlockedLevel: 'BASIC',
+    },
+  });
+
+  return matchedSkill;
+};
+
+/**
  * Get skills assigned to the authenticated employee ONLY
  */
 export const getMyAssignedSkills = async (req, res, next) => {
   try {
-    const profile = await prisma.employeeProfile.findUnique({
+    let profile = await prisma.employeeProfile.findUnique({
       where: { userId: req.user.id },
       include: {
         skillTracks: {
@@ -45,6 +96,30 @@ export const getMyAssignedSkills = async (req, res, next) => {
 
     if (!profile) {
       return res.status(404).json({ success: false, message: 'Employee profile not found.' });
+    }
+
+    // Self-heal: if employee has primarySkill set but no skillTracks yet, auto-link primarySkill
+    if (profile.skillTracks.length === 0 && profile.primarySkill) {
+      const linked = await syncEmployeePrimarySkillTrack(profile.id, profile.primarySkill).catch(() => null);
+      if (linked) {
+        profile = await prisma.employeeProfile.findUnique({
+          where: { userId: req.user.id },
+          include: {
+            skillTracks: {
+              include: {
+                skill: {
+                  include: {
+                    tasks: {
+                      where: { status: 'ACTIVE' },
+                    },
+                  },
+                },
+              },
+            },
+            skillProgress: true,
+          },
+        });
+      }
     }
 
     const assignedSkills = profile.skillTracks.map((track) => {
@@ -852,6 +927,41 @@ export const createAdminTask = async (req, res, next) => {
         orderIndex: count + 1,
       },
     });
+
+    // Ensure employees whose primarySkill matches this skill are auto-linked to it
+    try {
+      const matchingEmployees = await prisma.employeeProfile.findMany({
+        where: {
+          status: 'ACTIVE',
+          primarySkill: { equals: skill.name, mode: 'insensitive' },
+        },
+        select: { id: true, userId: true },
+      });
+      for (const emp of matchingEmployees) {
+        await syncEmployeePrimarySkillTrack(emp.id, skill.name);
+      }
+
+      // Notify all employees assigned to this skill track
+      const tracks = await prisma.employeeSkillTrack.findMany({
+        where: { skillId: resolvedSkillId },
+        include: { employeeProfile: { select: { userId: true } } },
+      });
+      for (const tr of tracks) {
+        if (tr.employeeProfile?.userId) {
+          await prisma.notification.create({
+            data: {
+              userId: tr.employeeProfile.userId,
+              title: `New ${skill.name} Task: ${task.title}`,
+              message: `A new ${task.level} task "${task.title}" has been assigned to your ${skill.name} track.`,
+              type: 'TASK_ASSIGNED',
+              link: `/employee/skills`,
+            },
+          });
+        }
+      }
+    } catch (notifyErr) {
+      console.warn('Task auto-assign/notify note:', notifyErr.message);
+    }
 
     res.status(201).json({ success: true, message: 'Task created successfully.', task });
   } catch (error) {
